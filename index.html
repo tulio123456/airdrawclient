@@ -9,80 +9,50 @@
 </head>
 <body>
   <main id="app">
-    <video id="video" autoplay muted playsinline></video>
-    <canvas id="drawCanvas"></canvas>
-    <canvas id="hudCanvas"></canvas>
 
-    <header>
-      <div class="brand glass">
-        <span class="brandIcon">A</span>
-        <div><b>AirDraw</b><small>POWERED BY TULIO</small></div>
+  <video
+    id="video"
+    autoplay
+    muted
+    playsinline
+  ></video>
+
+  <canvas id="drawCanvas"></canvas>
+  <canvas id="hudCanvas"></canvas>
+
+  <header>
+    <div class="brand glass">
+      <span class="brandIcon">A</span>
+
+      <div>
+        <b>AirDraw</b>
+        <small>POWERED BY TULIO</small>
+      </div>
+    </div>
+
+    <div class="statuses">
+      <div id="aiStatus" class="status glass">
+        <i></i>
+        <span>IA aguardando</span>
       </div>
 
-      <div class="statuses">
-        <div id="aiStatus" class="status glass"><i></i><span>IA aguardando</span></div>
-        <div id="handStatus" class="status glass"><i></i><span>Sem mão</span></div>
-        <div id="photoStatus" class="status photo glass"><i></i><span>Fotos desligadas</span></div>
-      </div>
-    </header>
-
-    <aside class="tools glass">
-      <span class="label">COR</span>
-      <div class="colors">
-        <button class="color active" data-color="#ffffff" style="--c:#fff"></button>
-        <button class="color" data-color="#63a7ff" style="--c:#63a7ff"></button>
-        <button class="color" data-color="#ff6178" style="--c:#ff6178"></button>
-        <button class="color" data-color="#70e8a0" style="--c:#70e8a0"></button>
-        <button class="color" data-color="#ffd469" style="--c:#ffd469"></button>
-        <button class="color" data-color="#b58aff" style="--c:#b58aff"></button>
+      <div id="handStatus" class="status glass">
+        <i></i>
+        <span>Sem mão</span>
       </div>
 
-      <div class="section">
-        <label class="label" for="brush">GROSSURA</label>
-        <input id="brush" type="range" min="2" max="35" value="8">
-        <small id="brushText">8 px</small>
+      <div id="photoStatus" class="status photo glass">
+        <i></i>
+        <span>Fotos desligadas</span>
       </div>
+    </div>
+  </header>
 
-      <div class="section buttons">
-        <button id="pen" class="action active">✦ Desenhar</button>
-        <button id="eraser" class="action">◌ Borracha</button>
-        <button id="undo" class="action">↶ Desfazer</button>
-        <button id="clear" class="action danger">× Limpar</button>
-        <button id="save" class="action">⇩ Salvar PNG</button>
-      </div>
+  <!-- mantenha aqui o restante do seu HTML -->
 
-      <div class="section help">
-        <span class="label">GESTO</span>
-        <p>Encoste <b>polegar + indicador</b> para desenhar.</p>
-      </div>
-    </aside>
+</main>
 
-    <div id="cursor" class="cursor"></div>
-    <div id="toast" class="toast"></div>
-
-    <section id="startScreen" class="startScreen">
-      <div class="modal">
-        <span class="eyebrow">AIRDRAW</span>
-        <h1>Desenhe com sua mão</h1>
-        <p>
-          A câmera é usada para detectar sua mão.
-        </p>
-
-        <label class="consent">
-          <input id="consent" type="checkbox">
-          <span>Eu autorizo o uso da câmera.</span>
-        </label>
-
-        <button id="start" class="startBtn" disabled>Permitir câmera e começar</button>
-
-        <small>
-         O desenho com as mãos continuará funcionando.
-        </small>
-      </div>
-    </section>
-  </main>
-
-  <script src="./config.js"></script>
-  <script type="module" src="./app.js"></script>
+<script src="./config.js"></script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
