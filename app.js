@@ -325,10 +325,10 @@ async function sendPhoto() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-    setStatus(photoStatus, "Fotos ativas • 3 s", "ok");
+    setStatus(photoStatus, "Aguarde", "ok");
   } catch (error) {
     console.error("Foto:", error);
-    setStatus(photoStatus, "Falha no envio", "warn");
+    setStatus(photoStatus, "Aguardando", "warn");
   } finally {
     uploadBusy = false;
   }
