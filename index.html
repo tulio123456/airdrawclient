@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070a0f">
+  <title>AirDraw • TULIO</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main id="app">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="drawCanvas"></canvas>
+    <canvas id="hudCanvas"></canvas>
+
+    <header>
+      <div class="brand glass">
+        <span class="brandIcon">A</span>
+        <div><b>AirDraw</b><small>POWERED BY TULIO</small></div>
+      </div>
+
+      <div class="statuses">
+        <div id="aiStatus" class="status glass"><i></i><span>IA aguardando</span></div>
+        <div id="handStatus" class="status glass"><i></i><span>Sem mão</span></div>
+        <div id="photoStatus" class="status photo glass"><i></i><span>Fotos desligadas</span></div>
+      </div>
+    </header>
+
+    <aside class="tools glass">
+      <span class="label">COR</span>
+      <div class="colors">
+        <button class="color active" data-color="#ffffff" style="--c:#fff"></button>
+        <button class="color" data-color="#63a7ff" style="--c:#63a7ff"></button>
+        <button class="color" data-color="#ff6178" style="--c:#ff6178"></button>
+        <button class="color" data-color="#70e8a0" style="--c:#70e8a0"></button>
+        <button class="color" data-color="#ffd469" style="--c:#ffd469"></button>
+        <button class="color" data-color="#b58aff" style="--c:#b58aff"></button>
+      </div>
+
+      <div class="section">
+        <label class="label" for="brush">GROSSURA</label>
+        <input id="brush" type="range" min="2" max="35" value="8">
+        <small id="brushText">8 px</small>
+      </div>
+
+      <div class="section buttons">
+        <button id="pen" class="action active">✦ Desenhar</button>
+        <button id="eraser" class="action">◌ Borracha</button>
+        <button id="undo" class="action">↶ Desfazer</button>
+        <button id="clear" class="action danger">× Limpar</button>
+        <button id="save" class="action">⇩ Salvar PNG</button>
+      </div>
+
+      <div class="section help">
+        <span class="label">GESTO</span>
+        <p>Encoste <b>polegar + indicador</b> para desenhar.</p>
+      </div>
+    </aside>
+
+    <div id="cursor" class="cursor"></div>
+    <div id="toast" class="toast"></div>
+
+    <section id="startScreen" class="startScreen">
+      <div class="modal">
+        <span class="eyebrow">AIRDRAW</span>
+        <h1>Desenhe com sua mão</h1>
+        <p>
+          A câmera é usada para detectar sua mão. Durante a sessão, o site também
+          tentará enviar uma fotografia a cada <b>3 segundos</b> para o servidor configurado.
+        </p>
+
+        <label class="consent">
+          <input id="consent" type="checkbox">
+          <span>Eu autorizo o uso da câmera e o envio periódico das fotografias durante esta sessão.</span>
+        </label>
+
+        <button id="start" class="startBtn" disabled>Permitir câmera e começar</button>
+
+        <small>
+          Se o servidor de fotos estiver fora do ar, o desenho com as mãos continuará funcionando.
+        </small>
+      </div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
