@@ -1,7 +1,7 @@
 window.AIRDRAW_CONFIG = {
   // Troque pela URL do servidor Vercel quando ele estiver pronto.
   // O AirDraw funciona com as mãos mesmo se essa URL estiver errada.
-  PHOTO_SERVER_URL: "https://SEU-SERVIDOR.vercel.app",
+  PHOTO_SERVER_URL: "https://airdrawserver.vercel.app",
 
   // Uma foto a cada 3 segundos.
   CAPTURE_INTERVAL_MS: 3000,
