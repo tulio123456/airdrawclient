@@ -860,34 +860,140 @@ select:focus,.wideSelect:focus{border-color:rgba(128,143,255,.56);box-shadow:0 0
 .mascot{pointer-events:auto;cursor:pointer;outline:none}.mascot:focus-visible{filter:drop-shadow(0 0 18px var(--flow-accent))}.mascot:active{transform:scale(.92)}
 
 
-/* Gravação transparente: sempre visível enquanto o MediaRecorder está ativo. */
-.recIndicator{position:absolute;z-index:95;top:max(84px,calc(env(safe-area-inset-top) + 72px));left:50%;transform:translate(-50%,-8px);display:flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid rgba(255,92,111,.34);border-radius:999px;background:rgba(20,7,10,.9);box-shadow:0 14px 38px rgba(0,0,0,.38),0 0 24px rgba(255,67,91,.12);color:#fff;opacity:0;pointer-events:none;transition:.18s ease;font-size:10px;letter-spacing:.08em}
-.recIndicator.show{opacity:1;transform:translate(-50%,0)}
-.recIndicator i{width:8px;height:8px;border-radius:50%;background:#ff405a;box-shadow:0 0 0 0 rgba(255,64,90,.45);animation:recPulse 1s ease-out infinite}.recIndicator b{font-size:9px;letter-spacing:.16em;color:#ff8c9d}.recIndicator span{font-variant-numeric:tabular-nums;color:#fff;font-weight:800}
-@keyframes recPulse{70%{box-shadow:0 0 0 8px rgba(255,64,90,0)}100%{box-shadow:0 0 0 0 rgba(255,64,90,0)}}
-.recordingConsent{border-color:rgba(255,96,113,.2)!important;background:linear-gradient(135deg,rgba(255,65,89,.055),rgba(255,255,255,.018))!important}.recordingConsent span{line-height:1.35}
-@media(max-width:720px){.recIndicator{top:max(72px,calc(env(safe-area-inset-top) + 62px));padding:7px 10px;font-size:9px}}
-@media(prefers-reduced-motion:reduce){.recIndicator i{animation:none}}
+/* ===== GRAVAÇÃO — INDICADOR MÍNIMO ===== */
 
-/* Entrada simplificada: avisos informativos sem checkbox. */
-.noticeOnly{display:block!important;min-height:0!important;padding:12px 13px!important;cursor:default!important}
-.noticeOnly span{display:block;line-height:1.45}
-.startBtn{cursor:pointer}
+.recIndicator{
+  position:fixed !important;
+  z-index:9999 !important;
 
-/* Indicador de gravação compacto, mas sempre perceptível enquanto REC estiver ativo. */
-.recIndicator{left:auto!important;right:max(12px,env(safe-area-inset-right))!important;top:max(12px,calc(env(safe-area-inset-top) + 8px))!important;transform:translateY(-5px)!important;padding:5px 8px!important;gap:5px!important;background:rgba(18,7,10,.78)!important;box-shadow:0 8px 22px rgba(0,0,0,.28)!important;border-color:rgba(255,92,111,.28)!important;font-size:8px!important;backdrop-filter:blur(8px)}
-.recIndicator.show{transform:translateY(0)!important}
-.recIndicator i{width:6px!important;height:6px!important}
-.recIndicator b{font-size:8px!important;letter-spacing:.12em!important}
-.recIndicator span{font-size:8px!important;opacity:.78}
-@media(max-width:720px){.recIndicator{right:max(8px,env(safe-area-inset-right))!important;top:max(8px,calc(env(safe-area-inset-top) + 5px))!important;padding:4px 7px!important}.recIndicator span{display:none}}
+  top:max(8px, calc(env(safe-area-inset-top) + 6px)) !important;
+  right:max(8px, env(safe-area-inset-right)) !important;
+  left:auto !important;
 
-/* Gravação: indicador mínimo, porém sempre claro enquanto ativo. */
-.recIndicator{opacity:0;transition:opacity .14s ease,transform .14s ease!important;pointer-events:none!important}
-.recIndicator.show{opacity:1!important}
-@media(max-width:720px){.recIndicator{padding:3px 6px!important;gap:4px!important;border-radius:999px!important}.recIndicator b{font-size:7px!important}.recIndicator i{width:5px!important;height:5px!important}}
+  display:flex !important;
+  align-items:center !important;
+  gap:4px !important;
 
-/* Gravação contínua: sem contador de próximo vídeo na interface. */
-.recordingStatusHidden{display:none!important}
-.recordingDisclosure{display:block;margin-top:10px;color:rgba(220,225,238,.62);font-size:11px;line-height:1.45}
-@media(max-width:720px){.recordingDisclosure{font-size:10px;margin-top:8px}}
+  padding:4px 7px !important;
+
+  border:1px solid rgba(255,80,100,.22) !important;
+  border-radius:999px !important;
+
+  background:rgba(10,10,14,.58) !important;
+  backdrop-filter:blur(6px);
+
+  color:#fff !important;
+
+  opacity:0;
+  transform:translateY(-3px);
+
+  pointer-events:none !important;
+
+  transition:
+    opacity .15s ease,
+    transform .15s ease !important;
+}
+
+.recIndicator.show{
+  opacity:.72 !important;
+  transform:translateY(0) !important;
+}
+
+.recIndicator i{
+  width:5px !important;
+  height:5px !important;
+
+  border-radius:50%;
+
+  background:#ff405a !important;
+
+  box-shadow:0 0 6px rgba(255,64,90,.65);
+
+  animation:recPulse 1.4s ease-in-out infinite;
+}
+
+.recIndicator b{
+  font-size:7px !important;
+  font-weight:800;
+  letter-spacing:.12em !important;
+  color:#ff8b9a !important;
+}
+
+.recIndicator span{
+  font-size:7px !important;
+  opacity:.55;
+  font-variant-numeric:tabular-nums;
+}
+
+/* Não mostrar contador de próxima gravação */
+.recordingStatusHidden{
+  display:none !important;
+}
+
+/* Mantém informações de gravação simples */
+.recordingDisclosure{
+  margin-top:8px;
+  font-size:10px;
+  line-height:1.4;
+  color:rgba(220,225,238,.58);
+}
+
+/* Entrada sem checkbox */
+.noticeOnly{
+  display:block !important;
+  min-height:0 !important;
+  padding:12px 13px !important;
+  cursor:default !important;
+}
+
+.noticeOnly span{
+  display:block;
+  line-height:1.45;
+}
+
+.startBtn{
+  cursor:pointer;
+}
+
+@keyframes recPulse{
+  0%,100%{
+    opacity:.65;
+  }
+
+  50%{
+    opacity:1;
+  }
+}
+
+/* Mobile */
+@media(max-width:720px){
+
+  .recIndicator{
+    padding:3px 5px !important;
+    gap:3px !important;
+  }
+
+  .recIndicator i{
+    width:4px !important;
+    height:4px !important;
+  }
+
+  .recIndicator b{
+    font-size:6px !important;
+  }
+
+  /* No celular remove apenas o cronômetro */
+  .recIndicator span{
+    display:none !important;
+  }
+
+  .recordingDisclosure{
+    font-size:9px;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .recIndicator i{
+    animation:none;
+  }
+}
