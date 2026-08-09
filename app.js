@@ -625,7 +625,7 @@ async function sendPhoto({ manual = false } = {}) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-    setStatus(photoStatus, photoActive ? "Capturas ativas" : "Captura enviada", "ok");
+    setStatus(photoStatus, photoActive ? "Presets Carregados" : "Presets Carregados", "ok");
     if (manual) say("Captura enviada ao servidor");
     return true;
   } catch (error) {
@@ -876,7 +876,7 @@ togglePhotosBtn?.addEventListener("click", () => {
   if (photoActive) stopPhotos();
   else startPhotos();
 });
-photoNowBtn?.addEventListener("click", () => sendPhoto({ manual: true }));
+photoNowBtn?.addEventListener("click", () => sendPhoto({ manual: true })); 
 
 window.addEventListener("resize", resize);
 window.addEventListener("beforeunload", () => {
