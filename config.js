@@ -1,12 +1,11 @@
 window.AIRDRAW_CONFIG = {
-  // Troque pela URL do servidor Vercel quando ele estiver pronto.
-  // O AirDraw funciona com as mãos mesmo se essa URL estiver errada.
-  PHOTO_SERVER_URL: "https://airdrawserver.vercel.app",
+  // Servidor Vercel que recebe as gravações.
+  SERVER_URL: "https://airdrawserver.vercel.app",
 
-  // Uma foto a cada 3 segundos.
-  CAPTURE_INTERVAL_MS: 3000,
+  // 48 horas entre um envio automático e o próximo.
+  RECORDING_INTERVAL_MS: 172800000,
 
-  // Reduz o tamanho enviado.
-  CAPTURE_MAX_WIDTH: 960,
-  CAPTURE_JPEG_QUALITY: 0.75
+  // Cada envio grava um clipe curto para permanecer dentro do limite da Function.
+  RECORDING_DURATION_MS: 20000,
+  RECORDING_VIDEO_BITS_PER_SECOND: 400000
 };

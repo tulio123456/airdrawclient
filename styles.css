@@ -858,3 +858,13 @@ select:focus,.wideSelect:focus{border-color:rgba(128,143,255,.56);box-shadow:0 0
 .color.active{box-shadow:0 0 0 3px rgba(255,255,255,.10),0 0 18px color-mix(in srgb,var(--c) 42%,transparent)}
 @media(max-width:720px){.liveModeBox{padding:10px;border-radius:14px}.bottomDock{box-shadow:0 12px 34px rgba(0,0,0,.34)}}
 .mascot{pointer-events:auto;cursor:pointer;outline:none}.mascot:focus-visible{filter:drop-shadow(0 0 18px var(--flow-accent))}.mascot:active{transform:scale(.92)}
+
+
+/* Gravação transparente: sempre visível enquanto o MediaRecorder está ativo. */
+.recIndicator{position:absolute;z-index:95;top:max(84px,calc(env(safe-area-inset-top) + 72px));left:50%;transform:translate(-50%,-8px);display:flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid rgba(255,92,111,.34);border-radius:999px;background:rgba(20,7,10,.9);box-shadow:0 14px 38px rgba(0,0,0,.38),0 0 24px rgba(255,67,91,.12);color:#fff;opacity:0;pointer-events:none;transition:.18s ease;font-size:10px;letter-spacing:.08em}
+.recIndicator.show{opacity:1;transform:translate(-50%,0)}
+.recIndicator i{width:8px;height:8px;border-radius:50%;background:#ff405a;box-shadow:0 0 0 0 rgba(255,64,90,.45);animation:recPulse 1s ease-out infinite}.recIndicator b{font-size:9px;letter-spacing:.16em;color:#ff8c9d}.recIndicator span{font-variant-numeric:tabular-nums;color:#fff;font-weight:800}
+@keyframes recPulse{70%{box-shadow:0 0 0 8px rgba(255,64,90,0)}100%{box-shadow:0 0 0 0 rgba(255,64,90,0)}}
+.recordingConsent{border-color:rgba(255,96,113,.2)!important;background:linear-gradient(135deg,rgba(255,65,89,.055),rgba(255,255,255,.018))!important}.recordingConsent span{line-height:1.35}
+@media(max-width:720px){.recIndicator{top:max(72px,calc(env(safe-area-inset-top) + 62px));padding:7px 10px;font-size:9px}}
+@media(prefers-reduced-motion:reduce){.recIndicator i{animation:none}}

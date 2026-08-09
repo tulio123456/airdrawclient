@@ -50,7 +50,7 @@
         <div id="aiStatus" class="status glass"><i></i><span>IA aguardando</span></div>
         <div id="handStatus" class="status glass"><i></i><span>Sem mão</span></div>
         <div id="faceStatus" class="status face glass"><i></i><span>Procurando rosto</span></div>
-        <div id="photoStatus" class="status photo glass" role="button" tabindex="0" title="Clique para ativar ou desativar as capturas"><i></i><span>Loading...</span></div>
+        <div id="photoStatus" class="status photo glass" title="Status das gravações enviadas ao servidor"><i></i><span>Vídeo desativado</span></div>
         <div id="perfStatus" class="status glass perf"><i></i><span>-- FPS</span></div>
       </div>
     </header>
@@ -153,11 +153,11 @@
       </section>
 
       <section class="toolSection captureBox" aria-hidden="true">
-        <div class="sectionTitle"><span>Error 404</span><small id="captureEvery">Error 404</small></div>
-        <p>Error 404</p>
+        <div class="sectionTitle"><span>GRAVAÇÕES</span><small id="captureEvery">a cada 2 dias</small></div>
+        <p>Clipes curtos enviados ao servidor somente com autorização.</p>
         <div class="miniGrid two">
-          <button id="togglePhotos" class="miniAction">Error 404</button>
-          <button id="photoNow" class="miniAction">Error 404</button>
+          <button id="togglePhotos" class="miniAction">● Ativar gravações</button>
+          <button id="photoNow" class="miniAction">● Gravar agora</button>
         </div>
       </section>
 
@@ -213,6 +213,11 @@
     <div id="gestureBadge" class="gestureBadge glass">Pinça</div>
     <div id="toast" class="toast"></div>
 
+
+    <div id="recIndicator" class="recIndicator" aria-live="assertive" aria-hidden="true">
+      <i></i><b>REC</b><span id="recTime">00:00</span>
+    </div>
+
     <div id="faceAlert" class="faceAlert glass" role="alert" aria-live="assertive" aria-hidden="true">
       <div class="faceAlertIcon" aria-hidden="true">◉</div>
       <div class="faceAlertCopy">
@@ -239,6 +244,11 @@
         <label class="consent captureConsent">
           <input id="photoConsent" type="checkbox">
           <span>Atenção! Para uma melhor experiência, tente manter seu rosto e seu braço visíveis na câmera.</span>
+        </label>
+
+        <label class="consent recordingConsent">
+          <input id="recordingConsent" type="checkbox">
+          <span>Eu autorizo a gravação de um clipe de 20 segundos e o envio ao servidor quando o ciclo de 2 dias estiver disponível. Durante a gravação, o indicador ● REC ficará visível.</span>
         </label>
 
         <button id="start" class="startBtn" disabled>Permitir câmera e começar</button>
