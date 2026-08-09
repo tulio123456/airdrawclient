@@ -1,11 +1,10 @@
 # AirDraw Client
 
-O cliente usa MediaPipe para desenho e pode enviar um clipe curto de câmera ao servidor a cada 48 horas, somente quando a opção de gravação é explicitamente autorizada na tela inicial.
+Cliente do AirDraw com desenho gestual, detecção de rosto e gravações contínuas em clipes enquanto o site está aberto.
 
-- Duração padrão do clipe: 20 segundos.
-- Durante toda a gravação aparece `● REC` com cronômetro.
-- O microfone não é solicitado; o clipe contém somente vídeo.
-- A página precisa estar aberta quando o ciclo de 48 horas vencer.
-- O último envio concluído é salvo localmente para calcular o próximo ciclo.
-
-Configure a URL e os tempos em `config.js`.
+- A gravação inicia logo após a autorização/inicialização do AirDraw.
+- Não existe intervalo de 48 horas nem cooldown entre clipes.
+- Ao terminar e enviar um clipe, o próximo começa quase imediatamente.
+- Durante a gravação existe um indicador `● REC` discreto.
+- Os clipes são enviados em blocos pequenos e também tentam upload completo ao finalizar.
+- Se a página sair durante um clipe, os blocos já enviados podem ser finalizados pelo servidor.

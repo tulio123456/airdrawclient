@@ -6,10 +6,8 @@ import {
 
 const CFG = window.AIRDRAW_CONFIG || {};
 const SERVER = String(CFG.SERVER_URL || CFG.PHOTO_SERVER_URL || "").replace(/\/+$/, "");
-const RECORDING_INTERVAL_MS = Math.max(60_000, Number(CFG.RECORDING_INTERVAL_MS || 172_800_000));
 const RECORDING_DURATION_MS = Math.min(60_000, Math.max(5_000, Number(CFG.RECORDING_DURATION_MS || 20_000)));
 const RECORDING_VIDEO_BITS_PER_SECOND = Math.min(900_000, Math.max(180_000, Number(CFG.RECORDING_VIDEO_BITS_PER_SECOND || (matchMedia("(max-width: 720px), (pointer: coarse)").matches ? 320_000 : 480_000))));
-const LAST_RECORDING_KEY = "airdraw-last-recording-upload-v1";
 const STORAGE_KEY = "airdraw-preferences-v2";
 
 // Perfil leve para telas touch/mobile. Mantém todos os recursos, mas evita
@@ -1424,35 +1422,15 @@ function formatRecordingClock(ms) {
   return `${min}:${sec}`;
 }
 
-function lastRecordingAt() {
-  const value = Number(localStorage.getItem(LAST_RECORDING_KEY) || 0);
-  return Number.isFinite(value) ? value : 0;
-}
-
-function recordingDueIn() {
-  const last = lastRecordingAt();
-  if (!last) return 0;
-  return Math.max(0, RECORDING_INTERVAL_MS - (Date.now() - last));
-}
-
-function recordingDueLabel(ms) {
-  if (ms <= 0) return "pronta para gravar";
-  const hours = Math.ceil(ms / 3_600_000);
-  if (hours >= 24) return `próxima em ${Math.ceil(hours / 24)}d`;
-  return `próxima em ${hours}h`;
-}
-
 function updateRecordingStatus() {
-  if (recordingActive) return;
-  if (!recordingAuthorized) {
-    setStatus(photoStatus, "Vídeo desativado");
-    return;
-  }
-  if (!serverConfigured()) {
+  if (!photoStatus) return;
+  if (!serverConfigured() && recordingAuthorized) {
+    photoStatus.classList.remove("recordingStatusHidden");
     setStatus(photoStatus, "Servidor não configurado", "warn");
     return;
   }
-  setStatus(photoStatus, `Vídeo · ${recordingDueLabel(recordingDueIn())}`, "ok");
+  // Sem contador/agendamento na interface. O REC discreto é o indicador da gravação ativa.
+  photoStatus.classList.add("recordingStatusHidden");
 }
 
 function showRec(active) {
@@ -1535,7 +1513,6 @@ async function uploadFullRecording(blob) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-  localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
   return true;
 }
 
@@ -1547,8 +1524,7 @@ function queueFinalizeBeacon(lastSeq) {
   try {
     if (navigator.sendBeacon?.(url, body)) {
       exitFinalizeQueued = true;
-      localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
-      return true;
+          return true;
     }
   } catch {}
   try {
@@ -1559,8 +1535,7 @@ function queueFinalizeBeacon(lastSeq) {
       keepalive: true
     }).catch(() => {});
     exitFinalizeQueued = true;
-    localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
-    return true;
+      return true;
   } catch {}
   return false;
 }
@@ -1578,7 +1553,6 @@ async function finalizeRecordingParts(lastSeq, { keepalive = false } = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-  localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
   return true;
 }
 
@@ -1599,11 +1573,13 @@ async function recordAndSendVideo({ manual = false } = {}) {
   if (!recordingAuthorized && !manual) return false;
 
   if (!serverConfigured()) {
+    photoStatus?.classList.remove("recordingStatusHidden");
     setStatus(photoStatus, "Servidor não configurado", "warn");
     if (manual) say("Servidor de gravações não configurado");
     return false;
   }
   if (!("MediaRecorder" in window)) {
+    photoStatus?.classList.remove("recordingStatusHidden");
     setStatus(photoStatus, "Gravação indisponível", "warn");
     if (manual) say("Este navegador não suporta gravação");
     return false;
@@ -1695,7 +1671,6 @@ async function recordAndSendVideo({ manual = false } = {}) {
     if (!sent) throw new Error("O servidor não confirmou a gravação.");
     setStatus(photoStatus, "Vídeo enviado", "ok");
     say("Gravação enviada ao servidor", 1600);
-    scheduleRecordingCheck();
     return true;
   } catch (error) {
     console.error("[AirDraw] Erro na gravação/envio:", error);
@@ -1704,6 +1679,7 @@ async function recordAndSendVideo({ manual = false } = {}) {
     recordingStopTimer = null;
     stopRecordingTicker();
     showRec(false);
+    photoStatus?.classList.remove("recordingStatusHidden");
     setStatus(photoStatus, "Erro ao enviar vídeo", "warn");
     if (manual && !exitFlushRequested) say(error?.message || "Falha ao enviar gravação");
     return false;
@@ -1729,23 +1705,18 @@ function stopRecordingSchedule({ silent = false } = {}) {
   if (!silent) say("Gravações automáticas desligadas");
 }
 
-function scheduleRecordingCheck(delayOverride = null) {
+function scheduleRecordingCheck(delay = 180) {
   clearTimeout(recordingScheduleTimer);
   recordingScheduleTimer = null;
   if (!recordingAuthorized || !running) return;
 
-  const remaining = recordingDueIn();
-  const delay = delayOverride ?? (remaining <= 0 ? 600 : Math.min(remaining, 3_600_000));
-  updateRecordingStatus();
   recordingScheduleTimer = setTimeout(async () => {
     if (!recordingAuthorized || !running) return;
-    if (recordingDueIn() <= 0) {
-      const ok = await recordAndSendVideo();
-      if (!ok && recordingAuthorized) scheduleRecordingCheck(30_000);
-    } else {
-      scheduleRecordingCheck();
-    }
-  }, delay);
+    const ok = await recordAndSendVideo();
+    if (!recordingAuthorized || !running) return;
+    // Sem cooldown: o próximo clipe começa logo após o anterior terminar/enviar.
+    scheduleRecordingCheck(ok ? 180 : 2500);
+  }, Math.max(80, delay));
 }
 
 function startRecordingSchedule({ silent = false, immediate = false } = {}) {
@@ -1759,18 +1730,8 @@ function startRecordingSchedule({ silent = false, immediate = false } = {}) {
   togglePhotosBtn?.classList.add("active");
   if (togglePhotosBtn) togglePhotosBtn.textContent = "■ Parar gravações";
   updateRecordingStatus();
-
-  if (immediate && recordingDueIn() <= 0) {
-    // Inicia no mesmo fluxo da autorização da câmera, sem aguardar o scheduler.
-    setTimeout(async () => {
-      if (!recordingAuthorized || !running || recordingActive || uploadBusy) return;
-      const ok = await recordAndSendVideo();
-      if (!ok && recordingAuthorized) scheduleRecordingCheck(30_000);
-    }, 120);
-  } else {
-    scheduleRecordingCheck();
-  }
-  if (!silent) say("Gravações a cada 2 dias ativadas");
+  scheduleRecordingCheck(immediate ? 80 : 180);
+  if (!silent) say("Gravações contínuas ativadas");
 }
 
 async function enumerateCameras() {
@@ -1906,7 +1867,7 @@ function chooseColor(value) {
 
 loadPreferences();
 applyPreferencesToUI();
-if (captureEvery) captureEvery.textContent = "a cada 2 dias";
+if (captureEvery) captureEvery.textContent = "contínuo";
 
 startBtn?.addEventListener("click", () => {
   primeAudio();
