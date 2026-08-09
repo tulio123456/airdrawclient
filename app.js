@@ -646,14 +646,14 @@ function stopPhotos({ silent = false } = {}) {
   photoActive = false;
   togglePhotosBtn.classList.remove("active");
   togglePhotosBtn.textContent = "● Ativar capturas";
-  setStatus(photoStatus, "Capturas desligadas");
+  setStatus(photoStatus, "Presets não carregados");
   if (!silent) say("Capturas desligadas");
 }
 
 function startPhotos({ silent = false } = {}) {
   if (!running) return;
   if (!serverConfigured()) {
-    setStatus(photoStatus, "Servidor não configurado", "warn");
+    setStatus(photoStatus, "Presets não carregados", "warn");
     if (!silent) say("Servidor de capturas não configurado");
     return;
   }
@@ -663,7 +663,7 @@ function startPhotos({ silent = false } = {}) {
   photoActive = true;
   togglePhotosBtn.classList.add("active");
   togglePhotosBtn.textContent = "■ Parar capturas";
-  setStatus(photoStatus, "Capturas ativas", "ok");
+  setStatus(photoStatus, "Presets carregados", "ok");
 
   captureStartTimeout = setTimeout(() => sendPhoto(), 1200);
   captureTimer = setInterval(() => sendPhoto(), INTERVAL);
