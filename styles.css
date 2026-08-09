@@ -138,7 +138,7 @@ select,.wideSelect{
 .miniGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .miniGrid.two{grid-template-columns:1fr 1fr}
 .miniAction{padding:8px 7px;text-align:center;font-size:9px}
-.captureBox{padding:11px;border:1px solid rgba(255,84,105,.15);border-radius:14px;background:rgba(255,74,98,.035)}
+.captureBox{display:none !important;padding:11px;border:1px solid rgba(255,84,105,.15);border-radius:14px;background:rgba(255,74,98,.035)}
 .captureBox .sectionTitle{margin-bottom:5px}
 .captureBox p,.hintBox p{margin:0 0 9px;color:#8994a7;font-size:9px;line-height:1.45}
 .hintBox b{color:#d6dbe5}
@@ -231,3 +231,6 @@ select,.wideSelect{
   .action{font-size:9px;padding:9px 8px}
   .bottomDock{gap:3px}.dockBtn{width:36px;height:36px}
 }
+
+#photoStatus[role="button"]{cursor:pointer;user-select:none}
+#photoStatus[role="button"]:focus-visible{outline:1px solid rgba(141,112,255,.75);outline-offset:2px}
