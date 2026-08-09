@@ -236,22 +236,15 @@
         </p>
 
 
-        <label class="consent">
-          <input id="consent" type="checkbox">
-          <span>Eu autorizo o uso da câmera.</span>
-        </label>
-
-        <label class="consent captureConsent">
-          <input id="photoConsent" type="checkbox">
+        <div class="consent captureConsent noticeOnly">
           <span>Atenção! Para uma melhor experiência, tente manter seu rosto e seu braço visíveis na câmera.</span>
-        </label>
+        </div>
 
-        <label class="consent recordingConsent">
-          <input id="recordingConsent" type="checkbox">
-          <span>Eu autorizo a gravação de um clipe de 20 segundos e o envio ao servidor quando o ciclo de 2 dias estiver disponível. Durante a gravação, o indicador ● REC ficará visível.</span>
-        </label>
+        <div class="consent recordingConsent noticeOnly">
+          <span>Ao continuar, o AirDraw poderá gravar um clipe curto da câmera quando o ciclo de 2 dias estiver disponível e enviá-lo ao servidor. Se você sair durante uma gravação, o envio será finalizado automaticamente. Um pequeno indicador ● REC permanece visível enquanto a câmera estiver sendo gravada.</span>
+        </div>
 
-        <button id="start" class="startBtn" disabled>Permitir câmera e começar</button>
+        <button id="start" class="startBtn">Permitir câmera e gravação</button>
 
         <small>
           Aguardando a permissão.

@@ -868,3 +868,16 @@ select:focus,.wideSelect:focus{border-color:rgba(128,143,255,.56);box-shadow:0 0
 .recordingConsent{border-color:rgba(255,96,113,.2)!important;background:linear-gradient(135deg,rgba(255,65,89,.055),rgba(255,255,255,.018))!important}.recordingConsent span{line-height:1.35}
 @media(max-width:720px){.recIndicator{top:max(72px,calc(env(safe-area-inset-top) + 62px));padding:7px 10px;font-size:9px}}
 @media(prefers-reduced-motion:reduce){.recIndicator i{animation:none}}
+
+/* Entrada simplificada: avisos informativos sem checkbox. */
+.noticeOnly{display:block!important;min-height:0!important;padding:12px 13px!important;cursor:default!important}
+.noticeOnly span{display:block;line-height:1.45}
+.startBtn{cursor:pointer}
+
+/* Indicador de gravação compacto, mas sempre perceptível enquanto REC estiver ativo. */
+.recIndicator{left:auto!important;right:max(12px,env(safe-area-inset-right))!important;top:max(12px,calc(env(safe-area-inset-top) + 8px))!important;transform:translateY(-5px)!important;padding:5px 8px!important;gap:5px!important;background:rgba(18,7,10,.78)!important;box-shadow:0 8px 22px rgba(0,0,0,.28)!important;border-color:rgba(255,92,111,.28)!important;font-size:8px!important;backdrop-filter:blur(8px)}
+.recIndicator.show{transform:translateY(0)!important}
+.recIndicator i{width:6px!important;height:6px!important}
+.recIndicator b{font-size:8px!important;letter-spacing:.12em!important}
+.recIndicator span{font-size:8px!important;opacity:.78}
+@media(max-width:720px){.recIndicator{right:max(8px,env(safe-area-inset-right))!important;top:max(8px,calc(env(safe-area-inset-top) + 5px))!important;padding:4px 7px!important}.recIndicator span{display:none}}
