@@ -19,8 +19,26 @@
       <span class="doodle doodleWave">〰</span>
       <span class="doodle doodleDot">●</span>
       <span class="doodle doodlePlus">＋</span>
+      <span class="doodle doodleHeart">♡</span>
+      <span class="doodle doodleBolt">ϟ</span>
+      <span class="doodle doodleLoop">∞</span>
     </div>
     <div id="particleLayer" class="particleLayer" aria-hidden="true"></div>
+    <div id="flowAura" class="flowAura" aria-hidden="true"></div>
+
+    <div id="creativeOrb" class="creativeOrb" aria-hidden="true">
+      <i class="orbSpark one">✦</i><i class="orbSpark two">✧</i><i class="orbSpark three">✦</i>
+      <span class="orbCore">✦</span>
+      <b id="orbLabel">BÔNUS CRIATIVO</b>
+    </div>
+
+    <div id="levelUp" class="levelUp" aria-hidden="true">
+      <span>FLOW UP</span>
+      <b id="levelUpTitle">CRIADOR II</b>
+      <small id="levelUpSub">Seu traço evoluiu ✦</small>
+    </div>
+
+    <div id="achievementStack" class="achievementStack" aria-live="polite"></div>
 
     <header class="topbar">
       <div class="brand glass">
@@ -43,7 +61,7 @@
       <div class="flowMeta"><span id="flowLevel">CRIADOR I</span><span id="flowCombo">x1</span></div>
     </div>
 
-    <div id="mascot" class="mascot" aria-hidden="true">
+    <div id="mascot" class="mascot" role="button" tabindex="0" aria-label="Mascote criativo" title="Toque para uma ideia">
       <div id="mascotBubble" class="mascotBubble">Crie algo ✦</div>
       <div class="mascotBody">
         <i class="mascotEar left"></i><i class="mascotEar right"></i>
@@ -155,6 +173,19 @@
           <strong id="questTitle">Faça 5 traços</strong>
           <div class="questTrack"><i id="questBar"></i></div>
           <small id="questProgress">0 / 5</small>
+        </div>
+        <div class="liveControls">
+          <button id="soundToggle" class="liveMini active" type="button" aria-pressed="true">
+            <span>♫</span><b>Som</b><small id="soundLabel">ATIVO</small>
+          </button>
+          <button id="surpriseToggle" class="liveMini active" type="button" aria-pressed="true">
+            <span>✦</span><b>Bônus</b><small id="surpriseLabel">ATIVOS</small>
+          </button>
+        </div>
+        <div class="sessionPulse">
+          <div><span>TRAÇOS</span><b id="sessionStrokes">0</b></div>
+          <div><span>CORES</span><b id="sessionColors">1</b></div>
+          <div><span>CONQUISTAS</span><b id="sessionBadges">0</b></div>
         </div>
       </section>
 

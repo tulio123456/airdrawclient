@@ -63,6 +63,20 @@ const questBar = $("#questBar");
 const mascot = $("#mascot");
 const mascotBubble = $("#mascotBubble");
 const particleLayer = $("#particleLayer");
+const flowAura = $("#flowAura");
+const creativeOrb = $("#creativeOrb");
+const orbLabel = $("#orbLabel");
+const levelUp = $("#levelUp");
+const levelUpTitle = $("#levelUpTitle");
+const levelUpSub = $("#levelUpSub");
+const achievementStack = $("#achievementStack");
+const soundToggle = $("#soundToggle");
+const soundLabel = $("#soundLabel");
+const surpriseToggle = $("#surpriseToggle");
+const surpriseLabel = $("#surpriseLabel");
+const sessionStrokesEl = $("#sessionStrokes");
+const sessionColorsEl = $("#sessionColors");
+const sessionBadgesEl = $("#sessionBadges");
 
 const tools = $("#tools");
 const toolsToggle = $("#toolsToggle");
@@ -139,6 +153,18 @@ let lastStrokeRewardAt = 0;
 let mascotTimer = null;
 let questIndex = 0;
 let questProgressValue = 0;
+let flowSoundEnabled = true;
+let flowSurprisesEnabled = true;
+let sessionStrokes = 0;
+let sessionAdjustments = 0;
+let strokesSinceOrb = 0;
+let creativeOrbActive = false;
+let creativeOrbPoint = null;
+let creativeOrbTimer = null;
+let audioContext = null;
+let lastFlowMaxAt = 0;
+const sessionColors = new Set([color.toLowerCase()]);
+const sessionAchievements = new Set();
 const FLOW_LEVEL_STEP = 120;
 const QUESTS = [
   { title: "Faça 5 traços", event: "stroke", target: 5, reward: 40 },
@@ -216,6 +242,188 @@ function say(text, duration = 1600) {
   say.timer = setTimeout(() => toast.classList.remove("show"), duration);
 }
 
+function setFlowAccent(value) {
+  if (!app || typeof value !== "string") return;
+  app.style.setProperty("--flow-accent", value);
+  app.style.setProperty("--flow-accent-soft", `${value}55`);
+}
+
+function updateSessionUI() {
+  if (sessionStrokesEl) sessionStrokesEl.textContent = String(sessionStrokes);
+  if (sessionColorsEl) sessionColorsEl.textContent = String(sessionColors.size);
+  if (sessionBadgesEl) sessionBadgesEl.textContent = String(sessionAchievements.size);
+}
+
+function updateLiveControls() {
+  if (soundToggle) {
+    soundToggle.classList.toggle("active", flowSoundEnabled);
+    soundToggle.setAttribute("aria-pressed", String(flowSoundEnabled));
+  }
+  if (soundLabel) soundLabel.textContent = flowSoundEnabled ? "ATIVO" : "MUDO";
+  if (surpriseToggle) {
+    surpriseToggle.classList.toggle("active", flowSurprisesEnabled);
+    surpriseToggle.setAttribute("aria-pressed", String(flowSurprisesEnabled));
+  }
+  if (surpriseLabel) surpriseLabel.textContent = flowSurprisesEnabled ? "ATIVOS" : "PAUSADOS";
+  if (!flowSurprisesEnabled) hideCreativeOrb();
+}
+
+function primeAudio() {
+  if (!flowSoundEnabled) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!audioContext) audioContext = new AudioCtx();
+    if (audioContext.state === "suspended") audioContext.resume().catch(() => {});
+  } catch {}
+}
+
+function playTone(freq, duration = .08, gainValue = .025, type = "sine", delay = 0) {
+  if (!flowEnabled || !flowSoundEnabled) return;
+  primeAudio();
+  if (!audioContext || audioContext.state !== "running") return;
+  const now = audioContext.currentTime + delay;
+  const osc = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, now);
+  gain.gain.setValueAtTime(.0001, now);
+  gain.gain.exponentialRampToValueAtTime(Math.max(.001, gainValue), now + .012);
+  gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+  osc.connect(gain).connect(audioContext.destination);
+  osc.start(now);
+  osc.stop(now + duration + .03);
+}
+
+function playFlowSound(kind = "tap") {
+  if (!flowSoundEnabled || !flowEnabled) return;
+  const quiet = MOBILE_PROFILE ? .018 : .024;
+  if (kind === "draw") {
+    playTone(520, .065, quiet, "sine");
+    playTone(780, .055, quiet * .7, "sine", .035);
+  } else if (kind === "color") {
+    playTone(620, .075, quiet, "triangle");
+    playTone(930, .075, quiet * .8, "triangle", .05);
+  } else if (kind === "quest") {
+    [523, 659, 784, 1047].forEach((f, i) => playTone(f, .13, quiet, "triangle", i * .055));
+  } else if (kind === "level") {
+    [392, 523, 659, 784, 1047].forEach((f, i) => playTone(f, .16, quiet * 1.05, "sine", i * .045));
+  } else if (kind === "orb") {
+    playTone(880, .10, quiet, "sine");
+    playTone(1320, .16, quiet * .75, "triangle", .045);
+  } else if (kind === "achievement") {
+    playTone(700, .08, quiet, "triangle");
+    playTone(1050, .12, quiet * .8, "triangle", .055);
+  }
+}
+
+function unlockAchievement(id, icon, title, detail) {
+  if (!flowEnabled || sessionAchievements.has(id)) return;
+  sessionAchievements.add(id);
+  updateSessionUI();
+  if (achievementStack) {
+    const card = document.createElement("div");
+    card.className = "achievementCard";
+    card.innerHTML = `<span>${icon}</span><div><small>CONQUISTA</small><b>${title}</b><em>${detail}</em></div>`;
+    achievementStack.appendChild(card);
+    requestAnimationFrame(() => card.classList.add("show"));
+    setTimeout(() => {
+      card.classList.remove("show");
+      setTimeout(() => card.remove(), 320);
+    }, 2600);
+  }
+  burstAt({ x: innerWidth * .5, y: Math.max(110, innerHeight * .22) }, "achievement", 10);
+  playFlowSound("achievement");
+  navigator.vibrate?.(18);
+}
+
+function celebrateLevel(level) {
+  if (!flowEnabled || !levelUp) return;
+  if (levelUpTitle) levelUpTitle.textContent = flowLevelName(level);
+  if (levelUpSub) levelUpSub.textContent = level >= 6 ? "Você entrou no FLOW máximo ✦" : "Seu traço evoluiu ✦";
+  levelUp.classList.remove("show");
+  void levelUp.offsetWidth;
+  levelUp.classList.add("show");
+  clearTimeout(celebrateLevel.timer);
+  celebrateLevel.timer = setTimeout(() => levelUp.classList.remove("show"), 2300);
+  burstAt({ x: innerWidth * .5, y: innerHeight * .42 }, "level", MOBILE_PROFILE ? 12 : 20);
+  playFlowSound("level");
+  navigator.vibrate?.([20, 30, 35]);
+  mascotReact("quest", `${flowLevelName(level)}! ✦`);
+}
+
+function triggerFlowMax(point) {
+  const now = performance.now();
+  if (!flowEnabled || flowCombo < 5 || now - lastFlowMaxAt < 9000) return;
+  lastFlowMaxAt = now;
+  app.classList.add("flow-max");
+  burstAt(point, "max", MOBILE_PROFILE ? 10 : 16);
+  say("✦ FLOW MÁXIMO · x5 ✦", 1250);
+  clearTimeout(triggerFlowMax.timer);
+  triggerFlowMax.timer = setTimeout(() => app.classList.remove("flow-max"), 1800);
+}
+
+function hideCreativeOrb() {
+  creativeOrbActive = false;
+  creativeOrbPoint = null;
+  clearTimeout(creativeOrbTimer);
+  creativeOrb?.classList.remove("show", "collected");
+}
+
+function spawnCreativeOrb() {
+  if (!flowEnabled || !flowSurprisesEnabled || creativeOrbActive || !facePresent || !creativeOrb) return;
+  const edgeX = MOBILE_PROFILE ? 56 : 90;
+  const top = MOBILE_PROFILE ? 150 : 135;
+  const bottom = MOBILE_PROFILE ? 120 : 105;
+  const usableW = Math.max(1, innerWidth - edgeX * 2);
+  const usableH = Math.max(1, innerHeight - top - bottom);
+  const x = edgeX + Math.random() * usableW;
+  const y = top + Math.random() * usableH;
+  creativeOrbPoint = { x, y };
+  creativeOrbActive = true;
+  creativeOrb.style.setProperty("--orb-x", `${x}px`);
+  creativeOrb.style.setProperty("--orb-y", `${y}px`);
+  if (orbLabel) orbLabel.textContent = "+25 FLOW";
+  creativeOrb.classList.remove("collected");
+  requestAnimationFrame(() => creativeOrb.classList.add("show"));
+  clearTimeout(creativeOrbTimer);
+  creativeOrbTimer = setTimeout(hideCreativeOrb, MOBILE_PROFILE ? 8500 : 10000);
+  mascotReact("idle", "Ache o bônus ✦");
+}
+
+function collectCreativeOrb(point) {
+  if (!creativeOrbActive) return;
+  creativeOrbActive = false;
+  clearTimeout(creativeOrbTimer);
+  creativeOrb?.classList.add("collected");
+  addFlow(25, "orb", point);
+  burstAt(point, "orb", MOBILE_PROFILE ? 12 : 20);
+  playFlowSound("orb");
+  say("✦ BÔNUS CRIATIVO +25", 1200);
+  unlockAchievement("orb", "✦", "Caçador de Flow", "Você encontrou um bônus criativo");
+  setTimeout(() => creativeOrb?.classList.remove("show", "collected"), 650);
+}
+
+function checkCreativeOrb(point) {
+  if (!creativeOrbActive || !creativeOrbPoint || !point) return;
+  const radius = MOBILE_PROFILE ? 64 : 58;
+  if (Math.hypot(point.x - creativeOrbPoint.x, point.y - creativeOrbPoint.y) <= radius) {
+    collectCreativeOrb(point);
+  }
+}
+
+function registerColorUse(value) {
+  if (typeof value === "string") sessionColors.add(value.toLowerCase());
+  updateSessionUI();
+  if (sessionColors.size >= 4) unlockAchievement("colors4", "◈", "Explorador de cores", "Você usou 4 cores na mesma sessão");
+  if (sessionColors.size >= 6) unlockAchievement("colors6", "✺", "Paleta completa", "Você explorou todas as cores base");
+}
+
+function registerAdjustmentUse() {
+  sessionAdjustments += 1;
+  if (sessionAdjustments >= 5) unlockAchievement("tuner", "⚙", "Afinador", "Você explorou 5 ajustes criativos");
+}
+
 function showGesture(text, point, tone = "default") {
   if (!gestureBadge || !point) return;
   if (lastGestureLabel !== text) gestureBadge.textContent = text;
@@ -240,6 +448,8 @@ function updateFlowUI({ pulse = false } = {}) {
   if (flowBar) flowBar.style.width = `${pct}%`;
   if (flowLevelEl) flowLevelEl.textContent = flowLevelName(level);
   if (flowComboEl) flowComboEl.textContent = `x${flowCombo}`;
+  if (mascot) mascot.dataset.level = String(Math.min(6, level));
+  app.dataset.flowLevel = String(Math.min(6, level));
   if (flowHud) {
     flowHud.classList.toggle("disabled", !flowEnabled);
     if (pulse && flowEnabled) {
@@ -310,11 +520,17 @@ function renderQuest() {
 function completeQuest(point) {
   const quest = QUESTS[questIndex % QUESTS.length];
   if (!quest) return;
+  const levelBefore = Math.floor(flowPoints / FLOW_LEVEL_STEP) + 1;
   flowPoints += quest.reward;
+  const levelAfter = Math.floor(flowPoints / FLOW_LEVEL_STEP) + 1;
   updateFlowUI({ pulse: true });
   creativeQuest?.classList.add("complete");
   burstAt(point, "quest", 12);
   mascotReact("quest");
+  playFlowSound("quest");
+  unlockAchievement(`quest-${questIndex}`, "★", "Desafio vencido", quest.title);
+  if (levelAfter > levelBefore) celebrateLevel(levelAfter);
+  if (flowSurprisesEnabled && !creativeOrbActive) setTimeout(spawnCreativeOrb, 700);
   navigator.vibrate?.([24, 35, 24]);
   setTimeout(() => {
     creativeQuest?.classList.remove("complete");
@@ -336,26 +552,44 @@ function registerQuestEvent(event, point) {
 function addFlow(amount, reason = "draw", point = null) {
   if (!flowEnabled) return;
   const now = performance.now();
+  const levelBefore = Math.floor(flowPoints / FLOW_LEVEL_STEP) + 1;
   flowCombo = now - lastFlowAt < 4200 ? Math.min(5, flowCombo + 1) : 1;
   lastFlowAt = now;
   const gained = Math.max(1, Math.round(amount * (1 + (flowCombo - 1) * .12)));
   flowPoints += gained;
+  const levelAfter = Math.floor(flowPoints / FLOW_LEVEL_STEP) + 1;
   updateFlowUI({ pulse: true });
-  burstAt(point, reason === "color" ? "color" : "flow", reason === "quest" ? 10 : 6);
+  burstAt(point, reason === "color" ? "color" : reason === "orb" ? "orb" : "flow", reason === "quest" ? 10 : 6);
+  if (reason === "adjust") registerAdjustmentUse();
+  if (flowPoints >= 100) unlockAchievement("flow100", "◆", "Flow 100", "Sua sessão passou de 100 Flow");
+  if (levelAfter > levelBefore) celebrateLevel(levelAfter);
+  triggerFlowMax(point);
 }
 
 function rewardStroke(point) {
   const now = performance.now();
   if (now - lastStrokeRewardAt < 360) return;
   lastStrokeRewardAt = now;
+  sessionStrokes += 1;
+  strokesSinceOrb += 1;
+  updateSessionUI();
   addFlow(3, "draw", point);
   registerQuestEvent("stroke", point);
   mascotReact("draw");
+  playFlowSound("draw");
+  if (sessionStrokes === 1) unlockAchievement("first-stroke", "✎", "Primeiro traço", "A criação começou");
+  if (sessionStrokes >= 12) unlockAchievement("strokes12", "〰", "Mão solta", "Você criou 12 traços na sessão");
+  if (strokesSinceOrb >= (MOBILE_PROFILE ? 7 : 6)) {
+    strokesSinceOrb = 0;
+    spawnCreativeOrb();
+  }
 }
 
 function setFlowEnabled(enabled) {
   flowEnabled = Boolean(enabled);
   updateFlowUI();
+  updateLiveControls();
+  if (!flowEnabled) hideCreativeOrb();
   savePreferences();
   if (flowEnabled) {
     mascotReact("idle", "Modo Vivo ligado ✦");
@@ -376,6 +610,8 @@ function loadPreferences() {
     if (typeof saved.mirrored === "boolean") mirrored = saved.mirrored;
     if (typeof saved.cameraVisible === "boolean") cameraVisible = saved.cameraVisible;
     if (typeof saved.flowEnabled === "boolean") flowEnabled = saved.flowEnabled;
+    if (typeof saved.flowSoundEnabled === "boolean") flowSoundEnabled = saved.flowSoundEnabled;
+    if (typeof saved.flowSurprisesEnabled === "boolean") flowSurprisesEnabled = saved.flowSurprisesEnabled;
   } catch (error) {
     console.warn("[AirDraw] Preferências inválidas:", error);
   }
@@ -391,7 +627,9 @@ function savePreferences() {
       stabilization,
       mirrored,
       cameraVisible,
-      flowEnabled
+      flowEnabled,
+      flowSoundEnabled,
+      flowSurprisesEnabled
     }));
   } catch (error) {
     console.warn("[AirDraw] Não foi possível salvar preferências:", error);
@@ -417,8 +655,12 @@ function applyPreferencesToUI() {
   mirrorCameraBtn.classList.toggle("active", mirrored);
   mirrorCameraBtn.textContent = mirrored ? "⇄ Espelhada" : "⇄ Normal";
   toggleCameraBtn.textContent = cameraVisible ? "◉ Ocultar" : "◉ Mostrar";
+  sessionColors.add(color.toLowerCase());
   updateFlowUI();
   renderQuest();
+  updateLiveControls();
+  updateSessionUI();
+  setFlowAccent(color);
 }
 
 function resize() {
@@ -545,6 +787,7 @@ function saveDrawing() {
   addFlow(18, "save", { x: innerWidth * .5, y: innerHeight * .72 });
   registerQuestEvent("save", { x: innerWidth * .5, y: innerHeight * .72 });
   mascotReact("save");
+  unlockAchievement("saved", "⇩", "Obra guardada", "Você salvou uma criação desta sessão");
 }
 
 function dist(a, b) {
@@ -681,9 +924,11 @@ function cycleColorByGesture() {
   const current = colors.findIndex((item) => item.toLowerCase() === color.toLowerCase());
   chooseColor(colors[(current + 1 + colors.length) % colors.length]);
   say("Cor alterada por gesto");
+  registerColorUse(color);
   addFlow(7, "color");
   registerQuestEvent("color");
   mascotReact("color");
+  playFlowSound("color");
 }
 
 function cycleStabilizationByGesture() {
@@ -766,6 +1011,7 @@ function setFaceRequirementState(present) {
 
   const wasPresent = facePresent;
   facePresent = false;
+  hideCreativeOrb();
   setStatus(faceStatus, "Rosto não detectado", "warn");
   app.classList.add("face-missing");
   if (faceAlert) {
@@ -925,6 +1171,7 @@ function processHand(result) {
     middleRingLatched = false;
     ringPinkyLatched = false;
     showGesture("Pinça", point, "draw");
+    checkCreativeOrb(point);
     if (!drawing) {
       pushHistory();
       drawing = true;
@@ -1364,6 +1611,7 @@ function toggleTools(force) {
 
 function chooseColor(value) {
   color = value;
+  setFlowAccent(value);
   customColor.value = value;
   colorHex.textContent = value.toUpperCase();
   $$(".color").forEach((button) => button.classList.toggle("active", button.dataset.color?.toLowerCase() === value.toLowerCase()));
@@ -1378,21 +1626,28 @@ if (captureEvery) captureEvery.textContent = `a cada ${Math.round(INTERVAL / 100
 consent?.addEventListener("change", () => {
   startBtn.disabled = !consent.checked;
 });
-startBtn?.addEventListener("click", startAirDraw);
+startBtn?.addEventListener("click", () => {
+  primeAudio();
+  startAirDraw();
+});
 
 $$(".color").forEach((button) => {
   button.addEventListener("click", () => {
     chooseColor(button.dataset.color);
+    registerColorUse(button.dataset.color);
     addFlow(3, "color");
     registerQuestEvent("color");
     mascotReact("color");
+    playFlowSound("color");
   });
 });
 customColor?.addEventListener("input", () => chooseColor(customColor.value));
 customColor?.addEventListener("change", () => {
+  registerColorUse(customColor.value);
   addFlow(3, "color");
   registerQuestEvent("color");
   mascotReact("color");
+  playFlowSound("color");
 });
 
 brush?.addEventListener("input", () => {
@@ -1477,6 +1732,43 @@ togglePhotosBtn?.addEventListener("click", () => {
 });
 photoNowBtn?.addEventListener("click", () => sendPhoto({ manual: true })); 
 flowToggle?.addEventListener("click", () => setFlowEnabled(!flowEnabled));
+soundToggle?.addEventListener("click", () => {
+  flowSoundEnabled = !flowSoundEnabled;
+  if (flowSoundEnabled) { primeAudio(); playFlowSound("achievement"); }
+  updateLiveControls();
+  savePreferences();
+  say(flowSoundEnabled ? "Som do Modo Vivo ativado" : "Som do Modo Vivo desativado");
+});
+surpriseToggle?.addEventListener("click", () => {
+  flowSurprisesEnabled = !flowSurprisesEnabled;
+  updateLiveControls();
+  savePreferences();
+  if (flowSurprisesEnabled && strokesSinceOrb >= 4) spawnCreativeOrb();
+  say(flowSurprisesEnabled ? "Bônus criativos ativados" : "Bônus criativos pausados");
+});
+
+function mascotIdea() {
+  if (!flowEnabled) return;
+  const ideas = [
+    "Tenta um traço gigante ✦",
+    "Que tal trocar de cor?",
+    "Desenha uma estrela ★",
+    "Faz uma curva bem suave 〰",
+    "Mistura duas grossuras ✦",
+    "Cria algo só com 3 traços"
+  ];
+  const text = ideas[Math.floor(Math.random() * ideas.length)];
+  mascotReact("idle", text);
+  burstAt({ x: innerWidth - (MOBILE_PROFILE ? 36 : 48), y: innerHeight - (MOBILE_PROFILE ? 96 : 118) }, "flow", 5);
+  playTone(660, .07, MOBILE_PROFILE ? .014 : .018, "triangle");
+}
+mascot?.addEventListener("click", mascotIdea);
+mascot?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    mascotIdea();
+  }
+});
 
 window.addEventListener("resize", scheduleResize, { passive: true });
 window.addEventListener("beforeunload", () => {
@@ -1484,10 +1776,14 @@ window.addEventListener("beforeunload", () => {
   stopPhotos({ silent: true });
   clearTimeout(resizeTimer);
   clearTimeout(sendPhoto.deferTimer);
+  clearTimeout(creativeOrbTimer);
+  clearTimeout(celebrateLevel.timer);
+  clearTimeout(triggerFlowMax.timer);
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   stream?.getTracks?.().forEach((track) => track.stop());
   try { handLandmarker?.close?.(); } catch {}
   try { faceDetector?.close?.(); } catch {}
+  try { audioContext?.close?.(); } catch {}
 });
 
 resize();
