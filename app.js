@@ -104,8 +104,14 @@ let selectedDeviceId = "";
 let twoFingerLatched = false;
 let threeFingerLatched = false;
 let openHandLatched = false;
+let rockLatched = false;
+let middleRingLatched = false;
+let ringPinkyLatched = false;
 let lastTwoFingerAction = 0;
 let lastThreeFingerAction = 0;
+let lastRockAction = 0;
+let lastMiddleRingAction = 0;
+let lastRingPinkyAction = 0;
 let lastGestureLabel = "";
 let fpsFrames = 0;
 let fpsWindowStart = performance.now();
@@ -393,6 +399,30 @@ function isThreeFingers(hand) {
   return index && middle && ring && !pinky;
 }
 
+function isRockGesture(hand) {
+  const index = fingerExtended(hand, 8, 6);
+  const middle = fingerExtended(hand, 12, 10);
+  const ring = fingerExtended(hand, 16, 14);
+  const pinky = fingerExtended(hand, 20, 18);
+  return index && !middle && !ring && pinky;
+}
+
+function isMiddleRingGesture(hand) {
+  const index = fingerExtended(hand, 8, 6);
+  const middle = fingerExtended(hand, 12, 10);
+  const ring = fingerExtended(hand, 16, 14);
+  const pinky = fingerExtended(hand, 20, 18);
+  return !index && middle && ring && !pinky;
+}
+
+function isRingPinkyGesture(hand) {
+  const index = fingerExtended(hand, 8, 6);
+  const middle = fingerExtended(hand, 12, 10);
+  const ring = fingerExtended(hand, 16, 14);
+  const pinky = fingerExtended(hand, 20, 18);
+  return !index && !middle && ring && pinky;
+}
+
 function isOpenHand(hand) {
   return fingerExtended(hand, 8, 6) &&
     fingerExtended(hand, 12, 10) &&
@@ -415,6 +445,37 @@ function cycleColorByGesture() {
   const current = colors.findIndex((item) => item.toLowerCase() === color.toLowerCase());
   chooseColor(colors[(current + 1 + colors.length) % colors.length]);
   say("Cor alterada por gesto");
+}
+
+function cycleStabilizationByGesture() {
+  const levels = ["off", "soft", "medium", "strong"];
+  const labels = { off: "Desligada", soft: "Suave", medium: "Média", strong: "Forte" };
+  const current = Math.max(0, levels.indexOf(stabilization));
+  stabilization = levels[(current + 1) % levels.length];
+  stabilizationSelect.value = stabilization;
+  smoothPoint = null;
+  savePreferences();
+  say(`Estabilização: ${labels[stabilization]}`);
+}
+
+function cycleOpacityByGesture() {
+  const levels = [1, .75, .5, .25];
+  const current = levels.findIndex((value) => Math.abs(value - opacity) < .02);
+  opacity = levels[(current + 1 + levels.length) % levels.length];
+  opacityInput.value = String(Math.round(opacity * 100));
+  opacityText.textContent = `${Math.round(opacity * 100)}%`;
+  savePreferences();
+  say(`Opacidade: ${Math.round(opacity * 100)}%`);
+}
+
+function cycleWidthByGesture() {
+  const levels = [4, 8, 14, 22, 32, 44];
+  const current = levels.findIndex((value) => value === width);
+  width = levels[(current + 1 + levels.length) % levels.length];
+  brush.value = String(width);
+  brushText.textContent = `${width} px`;
+  savePreferences();
+  say(`Grossura: ${width} px`);
 }
 
 function setDrawingMode(erase) {
@@ -442,6 +503,9 @@ function processHand(result) {
     twoFingerLatched = false;
     threeFingerLatched = false;
     openHandLatched = false;
+    rockLatched = false;
+    middleRingLatched = false;
+    ringPinkyLatched = false;
     return;
   }
 
@@ -460,6 +524,9 @@ function processHand(result) {
   const fist = isFist(hand);
   const twoFingers = isTwoFingers(hand);
   const threeFingers = isThreeFingers(hand);
+  const rockGesture = isRockGesture(hand);
+  const middleRingGesture = isMiddleRingGesture(hand);
+  const ringPinkyGesture = isRingPinkyGesture(hand);
   const openHand = isOpenHand(hand);
   const now = performance.now();
 
@@ -475,6 +542,9 @@ function processHand(result) {
     twoFingerLatched = false;
     threeFingerLatched = false;
     openHandLatched = false;
+    rockLatched = false;
+    middleRingLatched = false;
+    ringPinkyLatched = false;
     showGesture("Borracha", point, "eraser");
     if (!fistErasing) {
       pushHistory();
@@ -499,6 +569,9 @@ function processHand(result) {
     twoFingerLatched = false;
     threeFingerLatched = false;
     openHandLatched = false;
+    rockLatched = false;
+    middleRingLatched = false;
+    ringPinkyLatched = false;
     showGesture("Pinça", point, "draw");
     if (!drawing) {
       pushHistory();
@@ -523,6 +596,52 @@ function processHand(result) {
     return;
   }
   openHandLatched = false;
+
+  // Gestos extras: apenas ajustes visuais/ferramentas, nunca apagam nem desfazem o desenho.
+  if (rockGesture) {
+    middleRingLatched = false;
+    ringPinkyLatched = false;
+    twoFingerLatched = false;
+    threeFingerLatched = false;
+    if (!rockLatched && now - lastRockAction > 950) {
+      rockLatched = true;
+      lastRockAction = now;
+      cycleStabilizationByGesture();
+    }
+    showGesture("Estabilização", point, "stabilization");
+    return;
+  }
+  rockLatched = false;
+
+  if (middleRingGesture) {
+    rockLatched = false;
+    ringPinkyLatched = false;
+    twoFingerLatched = false;
+    threeFingerLatched = false;
+    if (!middleRingLatched && now - lastMiddleRingAction > 950) {
+      middleRingLatched = true;
+      lastMiddleRingAction = now;
+      cycleOpacityByGesture();
+    }
+    showGesture("Opacidade", point, "opacity");
+    return;
+  }
+  middleRingLatched = false;
+
+  if (ringPinkyGesture) {
+    rockLatched = false;
+    middleRingLatched = false;
+    twoFingerLatched = false;
+    threeFingerLatched = false;
+    if (!ringPinkyLatched && now - lastRingPinkyAction > 950) {
+      ringPinkyLatched = true;
+      lastRingPinkyAction = now;
+      cycleWidthByGesture();
+    }
+    showGesture("Grossura", point, "width");
+    return;
+  }
+  ringPinkyLatched = false;
 
   // Três dedos alternam a cor, uma vez por gesto.
   if (threeFingers) {
