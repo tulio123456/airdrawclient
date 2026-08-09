@@ -673,3 +673,42 @@ select:focus,.wideSelect:focus{border-color:rgba(128,143,255,.56);box-shadow:0 0
 @media(prefers-reduced-motion:reduce){
   .faceAlert,.faceAlertScan{animation:none;transition:none}
 }
+
+
+/* ===== AirDraw Mobile Performance Pass =====
+   Reduz apenas custo de composição no celular; não remove controles ou recursos. */
+@media(max-width:720px), (pointer:coarse){
+  /* Filtros CSS sobre vídeo ao vivo custam bastante GPU em celulares. A mesma
+     leitura visual é mantida pelo overlay do app, sem filtrar cada frame. */
+  #video{
+    filter:none;
+    opacity:.82;
+    transition:opacity .16s ease,transform .16s ease;
+    will-change:transform,opacity;
+  }
+  #app.face-missing #video{filter:none;opacity:.58}
+
+  /* Blur em várias superfícies sobre um vídeo em movimento é caro. No mobile
+     usamos fundos quase opacos equivalentes e preservamos o visual glass. */
+  .glass,.brand,.status,.tools,.bottomDock,.gestureBadge,.startScreen,.modal,.faceAlert{
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+  }
+
+  .brand{background:linear-gradient(145deg,rgba(15,21,32,.97),rgba(7,11,18,.96))}
+  .status{background:rgba(11,16,25,.94)}
+  .bottomDock{background:linear-gradient(180deg,rgba(16,22,34,.985),rgba(7,11,18,.98))}
+  .gestureBadge{background:rgba(8,12,19,.94)}
+
+  /* Cursor e feedback passam por composição, sem recalcular layout a cada frame. */
+  .cursor,.gestureBadge{will-change:translate,transform,opacity;contain:layout style paint}
+  #drawCanvas,#hudCanvas{contain:strict}
+
+  /* Evita que hover sintético de touch mantenha sombras/transições caras. */
+  .status:hover,.color:hover,.customColor:hover,.action:hover,.miniAction:hover,.startBtn:hover:not(:disabled){
+    transform:none;
+  }
+
+  /* O sweep é bonito no desktop, mas o alerta facial precisa ser leve no celular. */
+  .faceAlertScan{display:none}
+}

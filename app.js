@@ -11,6 +11,16 @@ const MAX_WIDTH = Number(CFG.CAPTURE_MAX_WIDTH || 960);
 const JPEG_QUALITY = Number(CFG.CAPTURE_JPEG_QUALITY || 0.75);
 const STORAGE_KEY = "airdraw-preferences-v2";
 
+// Perfil leve para telas touch/mobile. Mantém todos os recursos, mas evita
+// gastar o frame inteiro com inferência e composição visual pesada.
+const MOBILE_PROFILE = matchMedia("(max-width: 720px), (pointer: coarse)").matches;
+const CANVAS_DPR_MAX = MOBILE_PROFILE ? 1.25 : 2;
+const HISTORY_LIMIT = MOBILE_PROFILE ? 14 : 25;
+let detectionIntervalMs = MOBILE_PROFILE ? 40 : 0;
+let lastDetectionStartedAt = 0;
+let latencyEma = 0;
+let faceCheckPending = false;
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -23,8 +33,8 @@ if (!app || !video || !drawCanvas || !hudCanvas) {
   throw new Error("AirDraw: faltam elementos essenciais no HTML.");
 }
 
-const ctx = drawCanvas.getContext("2d");
-const hud = hudCanvas.getContext("2d");
+const ctx = drawCanvas.getContext("2d", { alpha: true, desynchronized: true });
+const hud = hudCanvas.getContext("2d", { alpha: true, desynchronized: true });
 
 const aiStatus = $("#aiStatus");
 const handStatus = $("#handStatus");
@@ -119,6 +129,9 @@ let fpsFrames = 0;
 let fpsWindowStart = performance.now();
 let currentFps = 0;
 let lastLatency = 0;
+let resizeTimer = null;
+let lastResizeWidth = innerWidth;
+let lastResizeHeight = innerHeight;
 
 // Face presence is intentionally checked less often than the hand tracker so mobile
 // devices keep the drawing loop responsive. Both detectors still run sequentially.
@@ -129,8 +142,9 @@ let faceLostStreak = 0;
 let lastFaceCheckAt = 0;
 let lastFaceTimestampMs = -1;
 let faceAlertVisible = false;
-const FACE_CHECK_INTERVAL_MS = 320;
-const FACE_LOST_CONFIRMATIONS = 3;
+const FACE_CHECK_INTERVAL_MS = MOBILE_PROFILE ? 560 : 320;
+const FACE_REACQUIRE_INTERVAL_MS = MOBILE_PROFILE ? 300 : 220;
+const FACE_LOST_CONFIRMATIONS = MOBILE_PROFILE ? 2 : 3;
 const FACE_FOUND_CONFIRMATIONS = 2;
 
 const photoCanvas = document.createElement("canvas");
@@ -153,6 +167,9 @@ const sessionId = (() => {
 
 function setStatus(element, text, state = "") {
   if (!element) return;
+  const cacheKey = `${state}|${text}`;
+  if (element.dataset.statusCache === cacheKey) return;
+  element.dataset.statusCache = cacheKey;
   element.classList.remove("ok", "warn");
   if (state) element.classList.add(state);
   const span = element.querySelector("span");
@@ -172,8 +189,7 @@ function showGesture(text, point, tone = "default") {
   if (lastGestureLabel !== text) gestureBadge.textContent = text;
   lastGestureLabel = text;
   gestureBadge.dataset.tone = tone;
-  gestureBadge.style.left = `${point.x}px`;
-  gestureBadge.style.top = `${point.y}px`;
+  gestureBadge.style.translate = `${point.x}px ${point.y}px`;
   gestureBadge.classList.add("show");
   clearTimeout(showGesture.timer);
   showGesture.timer = setTimeout(() => gestureBadge.classList.remove("show"), 340);
@@ -232,7 +248,7 @@ function applyPreferencesToUI() {
 }
 
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, CANVAS_DPR_MAX);
   const backup = document.createElement("canvas");
   backup.width = drawCanvas.width;
   backup.height = drawCanvas.height;
@@ -255,52 +271,88 @@ function resize() {
   }
 }
 
+function scheduleResize() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const widthChanged = Math.abs(innerWidth - lastResizeWidth) > 1;
+    const heightChanged = Math.abs(innerHeight - lastResizeHeight) > 1;
+    if (!widthChanged && !heightChanged) return;
+
+    // No mobile, a barra do navegador pode disparar vários resize seguidos.
+    // Espera o traço terminar para não recodificar o Canvas no meio do gesto.
+    if (MOBILE_PROFILE && drawing) {
+      scheduleResize();
+      return;
+    }
+
+    lastResizeWidth = innerWidth;
+    lastResizeHeight = innerHeight;
+    resize();
+  }, MOBILE_PROFILE ? 140 : 50);
+}
+
 function canvasData() {
   return drawCanvas.toDataURL("image/png");
 }
 
+function createCanvasSnapshot() {
+  const snapshot = typeof OffscreenCanvas !== "undefined"
+    ? new OffscreenCanvas(drawCanvas.width, drawCanvas.height)
+    : document.createElement("canvas");
+  snapshot.width = drawCanvas.width;
+  snapshot.height = drawCanvas.height;
+  const snapshotCtx = snapshot.getContext("2d", { alpha: true, desynchronized: true });
+  snapshotCtx?.drawImage(drawCanvas, 0, 0);
+  return snapshot;
+}
+
 function pushHistory() {
   try {
-    history.push(canvasData());
-    if (history.length > 25) history.shift();
+    // Evita PNG/base64 síncrono no início de cada traço. Em mobile essa era
+    // a maior pausa percebida entre a pinça e o primeiro risco.
+    history.push(createCanvasSnapshot());
+    if (history.length > HISTORY_LIMIT) history.shift();
     redoHistory = [];
   } catch (error) {
     console.warn("Não foi possível criar snapshot:", error);
   }
 }
 
-function restoreDataUrl(src) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      ctx.clearRect(0, 0, innerWidth, innerHeight);
-      ctx.drawImage(img, 0, 0, innerWidth, innerHeight);
-      resolve();
-    };
-    img.onerror = resolve;
-    img.src = src;
-  });
+function restoreSnapshot(snapshot) {
+  if (!snapshot) return;
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  ctx.drawImage(
+    snapshot,
+    0, 0, snapshot.width, snapshot.height,
+    0, 0, innerWidth, innerHeight
+  );
 }
 
 async function undo() {
-  const src = history.pop();
-  if (!src) {
+  const snapshot = history.pop();
+  if (!snapshot) {
     say("Nada para desfazer");
     return;
   }
-  try { redoHistory.push(canvasData()); } catch {}
-  await restoreDataUrl(src);
+  try {
+    redoHistory.push(createCanvasSnapshot());
+    if (redoHistory.length > HISTORY_LIMIT) redoHistory.shift();
+  } catch {}
+  restoreSnapshot(snapshot);
   say("Desfeito");
 }
 
 async function redo() {
-  const src = redoHistory.pop();
-  if (!src) {
+  const snapshot = redoHistory.pop();
+  if (!snapshot) {
     say("Nada para refazer");
     return;
   }
-  try { history.push(canvasData()); } catch {}
-  await restoreDataUrl(src);
+  try {
+    history.push(createCanvasSnapshot());
+    if (history.length > HISTORY_LIMIT) history.shift();
+  } catch {}
+  restoreSnapshot(snapshot);
   say("Refeito");
 }
 
@@ -343,10 +395,19 @@ function smooth(raw) {
     smoothPoint = raw;
     return raw;
   }
-  const alpha = smoothingAlpha();
+
+  // Suavização adaptativa: movimentos pequenos continuam estáveis; movimentos
+  // rápidos recebem resposta maior para o traço não ficar "atrás" do dedo.
+  const dx = raw.x - smoothPoint.x;
+  const dy = raw.y - smoothPoint.y;
+  const movement = Math.hypot(dx, dy);
+  const base = smoothingAlpha();
+  const boost = Math.min(MOBILE_PROFILE ? 0.38 : 0.28, movement / (MOBILE_PROFILE ? 90 : 120));
+  const alpha = Math.min(1, base + boost);
+
   smoothPoint = {
-    x: smoothPoint.x + (raw.x - smoothPoint.x) * alpha,
-    y: smoothPoint.y + (raw.y - smoothPoint.y) * alpha
+    x: smoothPoint.x + dx * alpha,
+    y: smoothPoint.y + dy * alpha
   };
   return smoothPoint;
 }
@@ -372,7 +433,7 @@ function stroke(start, end) {
       ctx.lineWidth = width * 1.8;
     } else if (brushType === "neon") {
       ctx.shadowColor = color;
-      ctx.shadowBlur = Math.max(10, width * 2.2);
+      ctx.shadowBlur = MOBILE_PROFILE ? Math.max(7, width * 1.45) : Math.max(10, width * 2.2);
       ctx.lineWidth = Math.max(1, width * .72);
     } else if (brushType === "dashed") {
       ctx.setLineDash([Math.max(5, width * 1.5), Math.max(4, width)]);
@@ -537,14 +598,11 @@ function setFaceRequirementState(present) {
   }
 }
 
-function runFaceCheck(timestampMs) {
+function runFaceCheckNow(timestampMs) {
   if (!faceDetector || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-  const now = performance.now();
-  if (now - lastFaceCheckAt < FACE_CHECK_INTERVAL_MS) return;
-  lastFaceCheckAt = now;
 
   let timestamp = Number(timestampMs);
-  if (!Number.isFinite(timestamp)) timestamp = now;
+  if (!Number.isFinite(timestamp)) timestamp = performance.now();
   if (timestamp <= lastFaceTimestampMs) timestamp = lastFaceTimestampMs + 0.001;
   lastFaceTimestampMs = timestamp;
 
@@ -559,9 +617,31 @@ function runFaceCheck(timestampMs) {
   }
 }
 
+function scheduleFaceCheck(timestampMs) {
+  if (!faceDetector || faceCheckPending) return;
+  const now = performance.now();
+  const interval = facePresent ? FACE_CHECK_INTERVAL_MS : FACE_REACQUIRE_INTERVAL_MS;
+  if (now - lastFaceCheckAt < interval) return;
+
+  faceCheckPending = true;
+  const execute = () => {
+    faceCheckPending = false;
+    if (!running || detectionBusy) return;
+    lastFaceCheckAt = performance.now();
+    runFaceCheckNow(Math.max(Number(timestampMs) || 0, performance.now()));
+  };
+
+  // O rosto é requisito, mas não precisa competir com o traço em cada frame.
+  // Em navegadores com idle callback ele roda fora do caminho crítico da mão.
+  if (MOBILE_PROFILE && "requestIdleCallback" in window) {
+    requestIdleCallback(execute, { timeout: 180 });
+  } else {
+    setTimeout(execute, 0);
+  }
+}
+
 function processHand(result) {
   const hand = result?.landmarks?.[0];
-  hud.clearRect(0, 0, innerWidth, innerHeight); // sem círculo na mão
 
   if (!facePresent) {
     if (hand) setStatus(handStatus, "Mão detectada · aguardando rosto", "warn");
@@ -616,8 +696,7 @@ function processHand(result) {
   const now = performance.now();
 
   cursor.style.opacity = "1";
-  cursor.style.left = `${point.x}px`;
-  cursor.style.top = `${point.y}px`;
+  cursor.style.translate = `${point.x}px ${point.y}px`;
   cursor.classList.toggle("draw", pinching);
 
   temporaryErase = fist;
@@ -796,19 +875,33 @@ async function loadHandAI() {
 
 function updatePerformance(startedAt) {
   lastLatency = Math.max(0, performance.now() - startedAt);
+  latencyEma = latencyEma ? (latencyEma * .82 + lastLatency * .18) : lastLatency;
   fpsFrames += 1;
   const now = performance.now();
   if (now - fpsWindowStart >= 1000) {
     currentFps = Math.round((fpsFrames * 1000) / (now - fpsWindowStart));
     fpsFrames = 0;
     fpsWindowStart = now;
-    setStatus(perfStatus, `${currentFps} FPS · ${Math.round(lastLatency)} ms`);
+
+    if (MOBILE_PROFILE) {
+      // Ajusta sozinho entre ~18 e 28 inferências/s conforme o aparelho.
+      if (latencyEma > 34) detectionIntervalMs = Math.min(56, detectionIntervalMs + 4);
+      else if (latencyEma < 22) detectionIntervalMs = Math.max(36, detectionIntervalMs - 2);
+    }
+
+    setStatus(perfStatus, `${currentFps} FPS · ${Math.round(latencyEma)} ms`);
   }
 }
 
 function runDetection(timestampMs) {
   if (!running || !handLandmarker || detectionBusy || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  const frameNow = performance.now();
+  if (detectionIntervalMs && frameNow - lastDetectionStartedAt < detectionIntervalMs) {
+    scheduleFaceCheck(timestampMs);
+    return;
+  }
   if (video.currentTime === lastVideoTime) return;
+  lastDetectionStartedAt = frameNow;
   lastVideoTime = video.currentTime;
 
   let timestamp = Number(timestampMs);
@@ -820,8 +913,8 @@ function runDetection(timestampMs) {
 
   try {
     const result = handLandmarker.detectForVideo(video, timestamp);
-    runFaceCheck(timestamp);
     processHand(result);
+    scheduleFaceCheck(timestamp);
     setStatus(aiStatus, "MediaPipe ativo", "ok");
     updatePerformance(startedAt);
   } catch (error) {
@@ -867,6 +960,14 @@ function serverConfigured() {
 async function sendPhoto({ manual = false } = {}) {
   if (!running || !stream || uploadBusy) return false;
   if (!photoActive && !manual) return false;
+
+  // Captura automática continua ativa, mas não disputa CPU/GPU com um traço
+  // em andamento no celular. Ela é adiada por poucos ms e tenta novamente.
+  if (MOBILE_PROFILE && !manual && drawing) {
+    clearTimeout(sendPhoto.deferTimer);
+    sendPhoto.deferTimer = setTimeout(() => sendPhoto(), 280);
+    return false;
+  }
 
   if (!serverConfigured()) {
     setStatus(photoStatus, "Servidor não configurado", "warn");
@@ -973,19 +1074,15 @@ async function enumerateCameras() {
 }
 
 async function openCamera(deviceId = "") {
+  const videoProfile = MOBILE_PROFILE
+    ? { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 30, max: 30 } }
+    : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } };
+
   const constraints = {
     audio: false,
     video: deviceId
-      ? {
-          deviceId: { exact: deviceId },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      : {
-          facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
+      ? { deviceId: { exact: deviceId }, ...videoProfile }
+      : { facingMode: "user", ...videoProfile }
   };
 
   const nextStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -1004,6 +1101,9 @@ async function openCamera(deviceId = "") {
   lastTimestampMs = -1;
   lastFaceTimestampMs = -1;
   lastFaceCheckAt = 0;
+  faceCheckPending = false;
+  lastDetectionStartedAt = 0;
+  latencyEma = 0;
   facePresent = false;
   faceSeenStreak = 0;
   faceLostStreak = 0;
@@ -1161,10 +1261,12 @@ togglePhotosBtn?.addEventListener("click", () => {
 });
 photoNowBtn?.addEventListener("click", () => sendPhoto({ manual: true })); 
 
-window.addEventListener("resize", resize);
+window.addEventListener("resize", scheduleResize, { passive: true });
 window.addEventListener("beforeunload", () => {
   running = false;
   stopPhotos({ silent: true });
+  clearTimeout(resizeTimer);
+  clearTimeout(sendPhoto.deferTimer);
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   stream?.getTracks?.().forEach((track) => track.stop());
   try { handLandmarker?.close?.(); } catch {}
