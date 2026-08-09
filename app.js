@@ -101,13 +101,11 @@ let mirrored = true;
 let cameraVisible = true;
 let selectedDeviceId = "";
 
-let twoFingerLatched = false;
 let threeFingerLatched = false;
 let openHandLatched = false;
 let rockLatched = false;
 let middleRingLatched = false;
 let ringPinkyLatched = false;
-let lastTwoFingerAction = 0;
 let lastThreeFingerAction = 0;
 let lastRockAction = 0;
 let lastMiddleRingAction = 0;
@@ -383,14 +381,6 @@ function isFist(hand) {
   return !index && !middle && !ring && !pinky;
 }
 
-function isTwoFingers(hand) {
-  const index = fingerExtended(hand, 8, 6);
-  const middle = fingerExtended(hand, 12, 10);
-  const ring = fingerExtended(hand, 16, 14);
-  const pinky = fingerExtended(hand, 20, 18);
-  return index && middle && !ring && !pinky;
-}
-
 function isThreeFingers(hand) {
   const index = fingerExtended(hand, 8, 6);
   const middle = fingerExtended(hand, 12, 10);
@@ -430,15 +420,6 @@ function isOpenHand(hand) {
     fingerExtended(hand, 20, 18);
 }
 
-function cycleBrushByGesture() {
-  const brushes = ["solid", "marker", "neon", "dashed"];
-  const current = Math.max(0, brushes.indexOf(brushType));
-  brushType = brushes[(current + 1) % brushes.length];
-  brushTypeSelect.value = brushType;
-  savePreferences();
-  const label = brushTypeSelect.options[brushTypeSelect.selectedIndex]?.text || brushType;
-  say(`Pincel: ${label}`);
-}
 
 function cycleColorByGesture() {
   const colors = ["#ffffff", "#63a7ff", "#ff6178", "#70e8a0", "#ffd469", "#b58aff"];
@@ -500,7 +481,6 @@ function processHand(result) {
     fistErasing = false;
     previous = null;
     smoothPoint = null;
-    twoFingerLatched = false;
     threeFingerLatched = false;
     openHandLatched = false;
     rockLatched = false;
@@ -522,7 +502,6 @@ function processHand(result) {
   const pinchRatio = dist(thumbTip, indexTip) / handScale;
   const pinching = pinchRatio < 0.40;
   const fist = isFist(hand);
-  const twoFingers = isTwoFingers(hand);
   const threeFingers = isThreeFingers(hand);
   const rockGesture = isRockGesture(hand);
   const middleRingGesture = isMiddleRingGesture(hand);
@@ -539,7 +518,6 @@ function processHand(result) {
 
   // Punho continua sendo a borracha temporária.
   if (fist) {
-    twoFingerLatched = false;
     threeFingerLatched = false;
     openHandLatched = false;
     rockLatched = false;
@@ -566,7 +544,6 @@ function processHand(result) {
 
   // Pinça tem prioridade: evita trocar ferramenta enquanto o usuário desenha.
   if (pinching) {
-    twoFingerLatched = false;
     threeFingerLatched = false;
     openHandLatched = false;
     rockLatched = false;
@@ -589,7 +566,6 @@ function processHand(result) {
 
   // Mão aberta pausa qualquer desenho e chama atenção visualmente.
   if (openHand) {
-    twoFingerLatched = false;
     threeFingerLatched = false;
     if (!openHandLatched) openHandLatched = true;
     showGesture("Pausado", point, "pause");
@@ -601,7 +577,6 @@ function processHand(result) {
   if (rockGesture) {
     middleRingLatched = false;
     ringPinkyLatched = false;
-    twoFingerLatched = false;
     threeFingerLatched = false;
     if (!rockLatched && now - lastRockAction > 950) {
       rockLatched = true;
@@ -616,7 +591,6 @@ function processHand(result) {
   if (middleRingGesture) {
     rockLatched = false;
     ringPinkyLatched = false;
-    twoFingerLatched = false;
     threeFingerLatched = false;
     if (!middleRingLatched && now - lastMiddleRingAction > 950) {
       middleRingLatched = true;
@@ -631,7 +605,6 @@ function processHand(result) {
   if (ringPinkyGesture) {
     rockLatched = false;
     middleRingLatched = false;
-    twoFingerLatched = false;
     threeFingerLatched = false;
     if (!ringPinkyLatched && now - lastRingPinkyAction > 950) {
       ringPinkyLatched = true;
@@ -645,7 +618,6 @@ function processHand(result) {
 
   // Três dedos alternam a cor, uma vez por gesto.
   if (threeFingers) {
-    twoFingerLatched = false;
     if (!threeFingerLatched && now - lastThreeFingerAction > 900) {
       threeFingerLatched = true;
       lastThreeFingerAction = now;
@@ -656,17 +628,6 @@ function processHand(result) {
   }
   threeFingerLatched = false;
 
-  // Dois dedos agora trocam o tipo de pincel; o gesto de desfazer foi removido.
-  if (twoFingers) {
-    if (!twoFingerLatched && now - lastTwoFingerAction > 900) {
-      twoFingerLatched = true;
-      lastTwoFingerAction = now;
-      cycleBrushByGesture();
-    }
-    showGesture("Trocar pincel", point, "brush");
-    return;
-  }
-  twoFingerLatched = false;
 }
 
 async function loadHandAI() {
