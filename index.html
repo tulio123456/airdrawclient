@@ -22,6 +22,7 @@
       <div class="statuses">
         <div id="aiStatus" class="status glass"><i></i><span>IA aguardando</span></div>
         <div id="handStatus" class="status glass"><i></i><span>Sem mão</span></div>
+        <div id="faceStatus" class="status face glass"><i></i><span>Procurando rosto</span></div>
         <div id="photoStatus" class="status photo glass" role="button" tabindex="0" title="Clique para ativar ou desativar as capturas"><i></i><span>Loading...</span></div>
         <div id="perfStatus" class="status glass perf"><i></i><span>-- FPS</span></div>
       </div>
@@ -140,6 +141,15 @@
     <div id="cursor" class="cursor" aria-hidden="true"></div>
     <div id="gestureBadge" class="gestureBadge glass">Pinça</div>
     <div id="toast" class="toast"></div>
+
+    <div id="faceAlert" class="faceAlert glass" role="alert" aria-live="assertive" aria-hidden="true">
+      <div class="faceAlertIcon" aria-hidden="true">◉</div>
+      <div class="faceAlertCopy">
+        <b>ROSTO FORA DA CÂMERA</b>
+        <span>Mantenha seu rosto visível para continuar usando o AirDraw.</span>
+      </div>
+      <div class="faceAlertScan" aria-hidden="true"></div>
+    </div>
 
     <section id="startScreen" class="startScreen">
       <div class="modal">

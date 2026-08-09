@@ -1,6 +1,7 @@
 import {
   FilesetResolver,
-  HandLandmarker
+  HandLandmarker,
+  FaceDetector
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm";
 
 const CFG = window.AIRDRAW_CONFIG || {};
@@ -27,6 +28,7 @@ const hud = hudCanvas.getContext("2d");
 
 const aiStatus = $("#aiStatus");
 const handStatus = $("#handStatus");
+const faceStatus = $("#faceStatus");
 const photoStatus = $("#photoStatus");
 const perfStatus = $("#perfStatus");
 const cursor = $("#cursor");
@@ -36,6 +38,7 @@ const consent = $("#consent");
 const photoConsent = $("#photoConsent");
 const startBtn = $("#start");
 const toast = $("#toast");
+const faceAlert = $("#faceAlert");
 
 const tools = $("#tools");
 const toolsToggle = $("#toolsToggle");
@@ -72,6 +75,7 @@ const captureEvery = $("#captureEvery");
 
 let stream = null;
 let handLandmarker = null;
+let faceDetector = null;
 let running = false;
 let detectionBusy = false;
 let animationFrameId = null;
@@ -115,6 +119,19 @@ let fpsFrames = 0;
 let fpsWindowStart = performance.now();
 let currentFps = 0;
 let lastLatency = 0;
+
+// Face presence is intentionally checked less often than the hand tracker so mobile
+// devices keep the drawing loop responsive. Both detectors still run sequentially.
+let facePresent = false;
+let faceMissSince = 0;
+let faceSeenStreak = 0;
+let faceLostStreak = 0;
+let lastFaceCheckAt = 0;
+let lastFaceTimestampMs = -1;
+let faceAlertVisible = false;
+const FACE_CHECK_INTERVAL_MS = 320;
+const FACE_LOST_CONFIRMATIONS = 3;
+const FACE_FOUND_CONFIRMATIONS = 2;
 
 const photoCanvas = document.createElement("canvas");
 const photoCtx = photoCanvas.getContext("2d", { alpha: false });
@@ -467,9 +484,98 @@ function setDrawingMode(erase) {
   dockEraser.classList.toggle("active", erase);
 }
 
+function setFaceRequirementState(present) {
+  if (present) {
+    faceSeenStreak += 1;
+    faceLostStreak = 0;
+    if (faceSeenStreak >= FACE_FOUND_CONFIRMATIONS) {
+      const wasMissing = !facePresent;
+      facePresent = true;
+      faceMissSince = 0;
+      setStatus(faceStatus, "Rosto detectado", "ok");
+      app.classList.remove("face-missing");
+      if (faceAlert) {
+        faceAlert.classList.remove("show");
+        faceAlert.setAttribute("aria-hidden", "true");
+      }
+      if (wasMissing && faceAlertVisible) say("Rosto detectado · desenho liberado", 1300);
+      faceAlertVisible = false;
+    } else {
+      setStatus(faceStatus, "Confirmando rosto...", "warn");
+    }
+    return;
+  }
+
+  faceLostStreak += 1;
+  faceSeenStreak = 0;
+  if (!faceMissSince) faceMissSince = performance.now();
+  if (faceLostStreak < FACE_LOST_CONFIRMATIONS) {
+    setStatus(faceStatus, "Verificando rosto...", "warn");
+    return;
+  }
+
+  const wasPresent = facePresent;
+  facePresent = false;
+  setStatus(faceStatus, "Rosto não detectado", "warn");
+  app.classList.add("face-missing");
+  if (faceAlert) {
+    faceAlert.classList.add("show");
+    faceAlert.setAttribute("aria-hidden", "false");
+  }
+  if (!faceAlertVisible) {
+    faceAlertVisible = true;
+    drawing = false;
+    temporaryErase = false;
+    fistErasing = false;
+    previous = null;
+    cursor.style.opacity = "0";
+    gestureBadge?.classList.remove("show");
+    if (wasPresent) {
+      say("Mostre seu rosto para continuar", 2200);
+      navigator.vibrate?.(70);
+    }
+  }
+}
+
+function runFaceCheck(timestampMs) {
+  if (!faceDetector || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  const now = performance.now();
+  if (now - lastFaceCheckAt < FACE_CHECK_INTERVAL_MS) return;
+  lastFaceCheckAt = now;
+
+  let timestamp = Number(timestampMs);
+  if (!Number.isFinite(timestamp)) timestamp = now;
+  if (timestamp <= lastFaceTimestampMs) timestamp = lastFaceTimestampMs + 0.001;
+  lastFaceTimestampMs = timestamp;
+
+  try {
+    const result = faceDetector.detectForVideo(video, timestamp);
+    const detected = Array.isArray(result?.detections) && result.detections.length > 0;
+    setFaceRequirementState(detected);
+  } catch (error) {
+    console.error("[AirDraw] Erro no Face Detector:", error);
+    setStatus(faceStatus, "Erro ao detectar rosto", "warn");
+    setFaceRequirementState(false);
+  }
+}
+
 function processHand(result) {
   const hand = result?.landmarks?.[0];
   hud.clearRect(0, 0, innerWidth, innerHeight); // sem círculo na mão
+
+  if (!facePresent) {
+    if (hand) setStatus(handStatus, "Mão detectada · aguardando rosto", "warn");
+    else setStatus(handStatus, "Sem mão");
+    cursor.style.opacity = "0";
+    cursor.classList.remove("draw");
+    gestureBadge?.classList.remove("show");
+    drawing = false;
+    temporaryErase = false;
+    fistErasing = false;
+    previous = null;
+    smoothPoint = null;
+    return;
+  }
 
   if (!hand) {
     setStatus(handStatus, "Sem mão");
@@ -664,6 +770,27 @@ async function loadHandAI() {
     console.log("[AirDraw] MediaPipe iniciado com CPU.");
   }
 
+  const faceModelPath =
+    "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+
+  try {
+    faceDetector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: faceModelPath, delegate: "GPU" },
+      runningMode: "VIDEO",
+      minDetectionConfidence: 0.55
+    });
+    console.log("[AirDraw] Face Detector iniciado com GPU.");
+  } catch (gpuError) {
+    console.warn("[AirDraw] Face Detector GPU não iniciou. Tentando CPU:", gpuError);
+    faceDetector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: faceModelPath },
+      runningMode: "VIDEO",
+      minDetectionConfidence: 0.55
+    });
+    console.log("[AirDraw] Face Detector iniciado com CPU.");
+  }
+
+  setStatus(faceStatus, "Procurando rosto...", "warn");
   setStatus(aiStatus, "MediaPipe pronto", "ok");
 }
 
@@ -693,6 +820,7 @@ function runDetection(timestampMs) {
 
   try {
     const result = handLandmarker.detectForVideo(video, timestamp);
+    runFaceCheck(timestamp);
     processHand(result);
     setStatus(aiStatus, "MediaPipe ativo", "ok");
     updatePerformance(startedAt);
@@ -874,6 +1002,12 @@ async function openCamera(deviceId = "") {
   oldStream?.getTracks?.().forEach((track) => track.stop());
   lastVideoTime = -1;
   lastTimestampMs = -1;
+  lastFaceTimestampMs = -1;
+  lastFaceCheckAt = 0;
+  facePresent = false;
+  faceSeenStreak = 0;
+  faceLostStreak = 0;
+  setStatus(faceStatus, "Procurando rosto...", "warn");
   await enumerateCameras();
 }
 
@@ -1034,6 +1168,7 @@ window.addEventListener("beforeunload", () => {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   stream?.getTracks?.().forEach((track) => track.stop());
   try { handLandmarker?.close?.(); } catch {}
+  try { faceDetector?.close?.(); } catch {}
 });
 
 resize();
