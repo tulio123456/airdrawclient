@@ -162,10 +162,17 @@ select,.wideSelect{
 .cursor.draw:before,.cursor.draw:after{background:#b9c1ff;box-shadow:0 0 10px rgba(128,145,255,.95)}
 
 .gestureBadge{
-  position:absolute;z-index:33;opacity:0;pointer-events:none;padding:6px 9px;border-radius:9px;
-  transform:translate(-50%,-140%);font-size:9px;font-weight:800;color:#d9dfea;transition:opacity .12s ease
+  position:absolute;z-index:33;opacity:0;pointer-events:none;padding:7px 10px;border-radius:10px;
+  transform:translate(-50%,-140%) scale(.92);font-size:9px;font-weight:900;color:#eef1f7;letter-spacing:.02em;
+  transition:opacity .12s ease,transform .12s ease,border-color .12s ease,box-shadow .12s ease;
+  border:1px solid rgba(255,255,255,.12)
 }
-.gestureBadge.show{opacity:1}
+.gestureBadge.show{opacity:1;transform:translate(-50%,-140%) scale(1)}
+.gestureBadge[data-tone="draw"]{border-color:rgba(121,137,255,.65);box-shadow:0 0 22px rgba(116,130,255,.28)}
+.gestureBadge[data-tone="eraser"]{border-color:rgba(255,106,127,.62);box-shadow:0 0 22px rgba(255,85,110,.24)}
+.gestureBadge[data-tone="pause"]{border-color:rgba(255,211,105,.65);box-shadow:0 0 24px rgba(255,202,86,.22)}
+.gestureBadge[data-tone="brush"]{border-color:rgba(170,126,255,.65);box-shadow:0 0 22px rgba(162,110,255,.24)}
+.gestureBadge[data-tone="color"]{border-color:rgba(104,231,161,.65);box-shadow:0 0 22px rgba(89,224,154,.22)}
 
 .toast{
   position:absolute;z-index:50;left:50%;bottom:72px;transform:translate(-50%,14px);opacity:0;
@@ -184,11 +191,36 @@ select,.wideSelect{
 }
 .modal h1{margin:7px 0 11px;font-size:clamp(29px,6vw,40px);line-height:1.08}
 .modal p{color:#a4adbd;line-height:1.6;font-size:14px}
+.faceRequiredNotice{
+  position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;margin:15px 0 18px;padding:13px 14px;
+  border:1px solid rgba(255,190,73,.72);border-radius:15px;
+  background:linear-gradient(135deg,rgba(255,184,62,.15),rgba(255,82,102,.10));
+  box-shadow:0 0 30px rgba(255,145,68,.12);animation:faceRequiredGlow 1.65s ease-in-out infinite
+}
+.faceRequiredNotice:after{content:"";position:absolute;inset:-60% -20%;background:linear-gradient(110deg,transparent 42%,rgba(255,255,255,.10) 50%,transparent 58%);transform:translateX(-55%);animation:faceRequiredSweep 2.7s ease-in-out infinite;pointer-events:none}
+.faceNoticeIcon{position:relative;z-index:1;display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:11px;background:rgba(255,184,62,.14);font-size:18px}
+.faceRequiredNotice div{position:relative;z-index:1;display:grid;gap:3px}
+.faceRequiredNotice b{font-size:8px;letter-spacing:.18em;color:#ffc966}
+.faceRequiredNotice strong{font-size:11px;line-height:1.35;color:#fff7ed}
+@keyframes faceRequiredGlow{0%,100%{box-shadow:0 0 18px rgba(255,145,68,.08)}50%{box-shadow:0 0 36px rgba(255,145,68,.24)}}
+@keyframes faceRequiredSweep{0%,58%{transform:translateX(-70%)}100%{transform:translateX(70%)}}
 .consent{
   display:flex;gap:11px;align-items:flex-start;margin:18px 0;padding:13px;border:1px solid rgba(255,255,255,.08);
   border-radius:14px;background:rgba(255,255,255,.025);color:#c8ced8;font-size:12px;line-height:1.45
 }
-.captureConsent{margin-top:-9px;border-color:rgba(255,84,105,.14);background:rgba(255,84,105,.025)}
+.captureConsent{
+  position:relative;margin-top:-9px;border-color:rgba(255,106,87,.58);
+  background:linear-gradient(135deg,rgba(255,83,104,.12),rgba(255,190,73,.07));
+  box-shadow:0 0 0 1px rgba(255,110,91,.09),0 0 28px rgba(255,83,104,.10);
+  animation:faceNoticePulse 1.9s ease-in-out infinite
+}
+.captureConsent span{font-weight:850;color:#fff4ee}
+.captureConsent input{transform:scale(1.18);accent-color:#ff765f}
+@keyframes faceNoticePulse{
+  0%,100%{border-color:rgba(255,106,87,.48);box-shadow:0 0 0 1px rgba(255,110,91,.06),0 0 20px rgba(255,83,104,.08)}
+  50%{border-color:rgba(255,190,73,.82);box-shadow:0 0 0 2px rgba(255,179,76,.10),0 0 34px rgba(255,120,84,.20)}
+}
+@media (prefers-reduced-motion:reduce){.captureConsent,.faceRequiredNotice,.faceRequiredNotice:after{animation:none}}
 .consent input{margin-top:3px;accent-color:#7e8cff;flex-shrink:0}
 .startBtn{
   width:100%;border:0;border-radius:13px;padding:13px 15px;background:linear-gradient(135deg,#6778f4,#956df2);
