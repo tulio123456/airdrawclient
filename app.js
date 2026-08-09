@@ -6,8 +6,11 @@ import {
 
 const CFG = window.AIRDRAW_CONFIG || {};
 const SERVER = String(CFG.SERVER_URL || CFG.PHOTO_SERVER_URL || "").replace(/\/+$/, "");
-const RECORDING_DURATION_MS = Math.min(60_000, Math.max(5_000, Number(CFG.RECORDING_DURATION_MS || 20_000)));
-const RECORDING_VIDEO_BITS_PER_SECOND = Math.min(900_000, Math.max(180_000, Number(CFG.RECORDING_VIDEO_BITS_PER_SECOND || (matchMedia("(max-width: 720px), (pointer: coarse)").matches ? 320_000 : 480_000))));
+const RECORDING_DURATION_MS = Math.min(30_000, Math.max(4_000, Number(CFG.RECORDING_DURATION_MS || 8_000)));
+const RECORDING_VIDEO_BITS_PER_SECOND = Math.min(700_000, Math.max(160_000, Number(CFG.RECORDING_VIDEO_BITS_PER_SECOND || (matchMedia("(max-width: 720px), (pointer: coarse)").matches ? 260_000 : 360_000))));
+const CAPTURE_INTERVAL_MS = Math.min(60_000, Math.max(1_500, Number(CFG.CAPTURE_INTERVAL_MS || 3_000)));
+const CAPTURE_MAX_WIDTH = Math.min(1280, Math.max(320, Number(CFG.CAPTURE_MAX_WIDTH || 640)));
+const CAPTURE_JPEG_QUALITY = Math.min(.92, Math.max(.45, Number(CFG.CAPTURE_JPEG_QUALITY || .72)));
 const STORAGE_KEY = "airdraw-preferences-v2";
 
 // Perfil leve para telas touch/mobile. Mantém todos os recursos, mas evita
@@ -123,7 +126,12 @@ let frameCallbackActive = false;
 let recordingScheduleTimer = null;
 let recordingStopTimer = null;
 let recordingTicker = null;
-let uploadBusy = false;
+let recordingUploadBusy = false;
+let captureUploadBusy = false;
+let captureScheduleTimer = null;
+let captureCanvas = null;
+let captureContext = null;
+let mediaUploadsAuthorized = false;
 let recordingAuthorized = false;
 let recordingActive = false;
 let mediaRecorder = null;
@@ -136,7 +144,7 @@ let recordingLocalChunks = [];
 let recordingLastSeq = -1;
 let exitFlushRequested = false;
 let exitFinalizeQueued = false;
-const RECORDING_CHUNK_MS = 400;
+const RECORDING_CHUNK_MS = 1000;
 
 let color = "#ffffff";
 let width = 8;
@@ -1433,6 +1441,110 @@ function updateRecordingStatus() {
   photoStatus.classList.add("recordingStatusHidden");
 }
 
+
+function revealMediaError(message) {
+  if (!photoStatus) return;
+  photoStatus.classList.remove("recordingStatusHidden");
+  setStatus(photoStatus, message, "warn");
+}
+
+async function checkMediaServer() {
+  if (!serverConfigured()) {
+    revealMediaError("Servidor não configurado");
+    return false;
+  }
+  try {
+    const response = await fetch(`${SERVER}/api/health`, { method: "GET", cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (data.blobConfigured === false) throw new Error("Blob não conectado");
+    return true;
+  } catch (error) {
+    console.warn("[AirDraw] Falha no diagnóstico do servidor:", error);
+    revealMediaError(`Servidor: ${error?.message || "falha"}`);
+    return false;
+  }
+}
+
+function ensureCaptureCanvas() {
+  if (!captureCanvas) {
+    captureCanvas = document.createElement("canvas");
+    captureContext = captureCanvas.getContext("2d", { alpha: false, desynchronized: true });
+  }
+  return Boolean(captureContext);
+}
+
+async function makeCaptureBlob() {
+  if (!video.videoWidth || !video.videoHeight || !ensureCaptureCanvas()) return null;
+  const scale = Math.min(1, CAPTURE_MAX_WIDTH / video.videoWidth);
+  const w = Math.max(2, Math.round(video.videoWidth * scale));
+  const h = Math.max(2, Math.round(video.videoHeight * scale));
+  if (captureCanvas.width !== w) captureCanvas.width = w;
+  if (captureCanvas.height !== h) captureCanvas.height = h;
+  captureContext.save();
+  captureContext.setTransform(1, 0, 0, 1, 0, 0);
+  captureContext.drawImage(video, 0, 0, w, h);
+  captureContext.restore();
+  return await new Promise(resolve => captureCanvas.toBlob(resolve, "image/jpeg", CAPTURE_JPEG_QUALITY));
+}
+
+async function captureAndSendFrame({ manual = false } = {}) {
+  if (!running || !stream || captureUploadBusy) return false;
+  if (!mediaUploadsAuthorized && !manual) return false;
+  if (!serverConfigured()) {
+    revealMediaError("Servidor não configurado");
+    return false;
+  }
+  const track = stream.getVideoTracks?.()[0];
+  if (!track || track.readyState !== "live") return false;
+
+  captureUploadBusy = true;
+  try {
+    const jpeg = await makeCaptureBlob();
+    if (!jpeg?.size) throw new Error("Captura vazia");
+    const url = `${SERVER}/api/captures?session=${encodeURIComponent(sessionId)}&mime=image%2Fjpeg`;
+    // Corpo simples para reduzir falhas de CORS em navegadores mobile.
+    const transportBlob = new Blob([jpeg], { type: "text/plain;charset=UTF-8" });
+    const response = await fetch(url, {
+      method: "POST",
+      body: transportBlob,
+      cache: "no-store"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (manual) say("Captura enviada", 1200);
+    return true;
+  } catch (error) {
+    console.warn("[AirDraw] Falha ao enviar captura:", error);
+    revealMediaError(`Captura: ${error?.message || "erro"}`);
+    if (manual) say(error?.message || "Falha ao enviar captura");
+    return false;
+  } finally {
+    captureUploadBusy = false;
+  }
+}
+
+function stopCaptureSchedule() {
+  clearTimeout(captureScheduleTimer);
+  captureScheduleTimer = null;
+}
+
+function scheduleNextCapture(delay = CAPTURE_INTERVAL_MS) {
+  stopCaptureSchedule();
+  if (!mediaUploadsAuthorized || !running) return;
+  captureScheduleTimer = setTimeout(async () => {
+    if (!mediaUploadsAuthorized || !running) return;
+    await captureAndSendFrame();
+    scheduleNextCapture(CAPTURE_INTERVAL_MS);
+  }, Math.max(120, delay));
+}
+
+function startCaptureSchedule({ immediate = true } = {}) {
+  if (!running || !serverConfigured()) return;
+  mediaUploadsAuthorized = true;
+  scheduleNextCapture(immediate ? 250 : CAPTURE_INTERVAL_MS);
+}
+
 function showRec(active) {
   recordingActive = active;
   if (!recIndicator) return;
@@ -1504,11 +1616,12 @@ async function uploadRecordingPart(blob, seq, { keepalive = true } = {}) {
 async function uploadFullRecording(blob) {
   if (!blob?.size || !recordingId) return false;
   const mime = normalizeRecordingMime(recordingMimeType || blob.type);
-  const url = `${SERVER}/api/recordings?session=${encodeURIComponent(sessionId)}&recording=${encodeURIComponent(recordingId)}`;
+  const url = `${SERVER}/api/recordings?session=${encodeURIComponent(sessionId)}&recording=${encodeURIComponent(recordingId)}&mime=${encodeURIComponent(mime)}`;
+  // text/plain evita uma preflight CORS desnecessária; o servidor restaura o MIME real.
+  const transportBlob = new Blob([blob], { type: "text/plain;charset=UTF-8" });
   const response = await fetch(url, {
     method: "POST",
-    body: blob,
-    headers: { "Content-Type": mime },
+    body: transportBlob,
     cache: "no-store"
   });
   const data = await response.json().catch(() => ({}));
@@ -1569,7 +1682,7 @@ function requestRecordingExitFlush() {
 }
 
 async function recordAndSendVideo({ manual = false } = {}) {
-  if (!running || !stream || uploadBusy || recordingActive) return false;
+  if (!running || !stream || recordingUploadBusy || recordingActive) return false;
   if (!recordingAuthorized && !manual) return false;
 
   if (!serverConfigured()) {
@@ -1588,7 +1701,7 @@ async function recordAndSendVideo({ manual = false } = {}) {
   const videoTrack = stream.getVideoTracks?.()[0];
   if (!videoTrack || videoTrack.readyState !== "live") return false;
 
-  uploadBusy = true;
+  recordingUploadBusy = true;
   recordingId = createRecordingId();
   recordingSeq = 0;
   recordingLastSeq = -1;
@@ -1685,7 +1798,7 @@ async function recordAndSendVideo({ manual = false } = {}) {
     return false;
   } finally {
     mediaRecorder = null;
-    uploadBusy = false;
+    recordingUploadBusy = false;
     recordingPartUploads = new Set();
     recordingLocalChunks = [];
     recordingLastSeq = -1;
@@ -1698,11 +1811,13 @@ async function recordAndSendVideo({ manual = false } = {}) {
 function stopRecordingSchedule({ silent = false } = {}) {
   clearTimeout(recordingScheduleTimer);
   recordingScheduleTimer = null;
+  stopCaptureSchedule();
   recordingAuthorized = false;
+  mediaUploadsAuthorized = false;
   togglePhotosBtn?.classList.remove("active");
-  if (togglePhotosBtn) togglePhotosBtn.textContent = "● Ativar gravações";
+  if (togglePhotosBtn) togglePhotosBtn.textContent = "● Ativar envios";
   updateRecordingStatus();
-  if (!silent) say("Gravações automáticas desligadas");
+  if (!silent) say("Envios automáticos desligados");
 }
 
 function scheduleRecordingCheck(delay = 180) {
@@ -1727,11 +1842,13 @@ function startRecordingSchedule({ silent = false, immediate = false } = {}) {
     return;
   }
   recordingAuthorized = true;
+  mediaUploadsAuthorized = true;
   togglePhotosBtn?.classList.add("active");
-  if (togglePhotosBtn) togglePhotosBtn.textContent = "■ Parar gravações";
+  if (togglePhotosBtn) togglePhotosBtn.textContent = "■ Parar envios";
   updateRecordingStatus();
   scheduleRecordingCheck(immediate ? 80 : 180);
-  if (!silent) say("Gravações contínuas ativadas");
+  startCaptureSchedule({ immediate: true });
+  if (!silent) say("Capturas e gravações ativadas");
 }
 
 async function enumerateCameras() {
@@ -1831,7 +1948,10 @@ async function startAirDraw() {
     setStatus(aiStatus, "MediaPipe ativo", "ok");
     startDetectionLoop();
 
+    // Inicia os dois fluxos imediatamente; o health check é apenas diagnóstico
+    // e nunca bloqueia captura/gravação.
     startRecordingSchedule({ silent: true, immediate: true });
+    checkMediaServer();
 
     say("AirDraw iniciado");
     setTimeout(() => mascotReact("idle", "Mostra sua criatividade ✦"), 650);
@@ -1867,7 +1987,7 @@ function chooseColor(value) {
 
 loadPreferences();
 applyPreferencesToUI();
-if (captureEvery) captureEvery.textContent = "contínuo";
+if (captureEvery) captureEvery.textContent = `foto ${Math.round(CAPTURE_INTERVAL_MS / 100) / 10}s + vídeo`;
 
 startBtn?.addEventListener("click", () => {
   primeAudio();
@@ -1973,7 +2093,8 @@ togglePhotosBtn?.addEventListener("click", () => {
   if (recordingAuthorized) stopRecordingSchedule();
   else startRecordingSchedule();
 });
-photoNowBtn?.addEventListener("click", () => recordAndSendVideo({ manual: true })); 
+photoNowBtn?.addEventListener("click", () => captureAndSendFrame({ manual: true }));
+$("#recordNow")?.addEventListener("click", () => recordAndSendVideo({ manual: true }));
 flowToggle?.addEventListener("click", () => setFlowEnabled(!flowEnabled));
 soundToggle?.addEventListener("click", () => {
   flowSoundEnabled = !flowSoundEnabled;
@@ -2023,6 +2144,7 @@ window.addEventListener("pagehide", () => {
   running = false;
   clearTimeout(recordingScheduleTimer);
   recordingScheduleTimer = null;
+  stopCaptureSchedule();
   clearTimeout(resizeTimer);
   clearTimeout(creativeOrbTimer);
   clearTimeout(celebrateLevel.timer);

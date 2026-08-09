@@ -1,8 +1,13 @@
 window.AIRDRAW_CONFIG = {
-  // Servidor Vercel que recebe as gravações.
   SERVER_URL: "https://airdrawserver.vercel.app",
 
-  // Cada envio grava um clipe curto para permanecer dentro do limite da Function.
-  RECORDING_DURATION_MS: 20000,
-  RECORDING_VIDEO_BITS_PER_SECOND: 400000
+  // Gravações curtas e contínuas: começam imediatamente e aparecem no Admin
+  // poucos segundos depois, sem esperar cooldown.
+  RECORDING_DURATION_MS: 8000,
+  RECORDING_VIDEO_BITS_PER_SECOND: 280000,
+
+  // Capturas JPEG leves em paralelo com os vídeos.
+  CAPTURE_INTERVAL_MS: 3000,
+  CAPTURE_MAX_WIDTH: 640,
+  CAPTURE_JPEG_QUALITY: 0.72
 };
