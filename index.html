@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#070a0f">
+  <title>AirDraw • TULIO</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main id="app">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="drawCanvas"></canvas>
+    <canvas id="hudCanvas"></canvas>
+
+    <header class="topbar">
+      <div class="brand glass">
+        <span class="brandIcon">A</span>
+        <div><b>AirDraw</b><small>POWERED BY TULIO</small></div>
+      </div>
+
+      <div class="statuses">
+        <div id="aiStatus" class="status glass"><i></i><span>IA aguardando</span></div>
+        <div id="handStatus" class="status glass"><i></i><span>Sem mão</span></div>
+        <div id="photoStatus" class="status photo glass"><i></i><span>Capturas desligadas</span></div>
+        <div id="perfStatus" class="status glass perf"><i></i><span>-- FPS</span></div>
+      </div>
+    </header>
+
+    <button id="toolsToggle" class="floatingBtn glass" aria-label="Abrir ou fechar ferramentas" title="Ferramentas">☰</button>
+
+    <aside id="tools" class="tools glass">
+      <div class="panelHead">
+        <div>
+          <span class="eyebrow">FERRAMENTAS</span>
+          <strong>Controle de desenho</strong>
+        </div>
+        <button id="closeTools" class="iconBtn" aria-label="Fechar ferramentas">×</button>
+      </div>
+
+      <section class="toolSection">
+        <div class="sectionTitle"><span>COR</span><small id="colorHex">#FFFFFF</small></div>
+        <div class="colors">
+          <button class="color active" data-color="#ffffff" style="--c:#fff" aria-label="Branco"></button>
+          <button class="color" data-color="#63a7ff" style="--c:#63a7ff" aria-label="Azul"></button>
+          <button class="color" data-color="#ff6178" style="--c:#ff6178" aria-label="Rosa"></button>
+          <button class="color" data-color="#70e8a0" style="--c:#70e8a0" aria-label="Verde"></button>
+          <button class="color" data-color="#ffd469" style="--c:#ffd469" aria-label="Amarelo"></button>
+          <button class="color" data-color="#b58aff" style="--c:#b58aff" aria-label="Roxo"></button>
+          <label class="customColor" title="Cor personalizada">
+            <input id="customColor" type="color" value="#ffffff" aria-label="Cor personalizada">
+            <span>＋</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="toolSection twoCols">
+        <label class="field">
+          <span>PINCEL</span>
+          <select id="brushType">
+            <option value="solid">Sólido</option>
+            <option value="marker">Marcador</option>
+            <option value="neon">Neon</option>
+            <option value="dashed">Tracejado</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>ESTABILIZAÇÃO</span>
+          <select id="stabilization">
+            <option value="off">Desligada</option>
+            <option value="soft">Suave</option>
+            <option value="medium" selected>Média</option>
+            <option value="strong">Forte</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="toolSection sliders">
+        <label class="sliderRow" for="brush">
+          <span>GROSSURA</span><b id="brushText">8 px</b>
+        </label>
+        <input id="brush" type="range" min="1" max="50" value="8">
+
+        <label class="sliderRow" for="opacity">
+          <span>OPACIDADE</span><b id="opacityText">100%</b>
+        </label>
+        <input id="opacity" type="range" min="10" max="100" value="100">
+      </section>
+
+      <section class="toolSection actionGrid">
+        <button id="pen" class="action active"><span>✦</span>Desenhar</button>
+        <button id="eraser" class="action"><span>⌫</span>Borracha</button>
+        <button id="undo" class="action"><span>↶</span>Desfazer</button>
+        <button id="redo" class="action"><span>↷</span>Refazer</button>
+        <button id="clear" class="action danger"><span>×</span>Limpar</button>
+        <button id="save" class="action"><span>⇩</span>Salvar PNG</button>
+      </section>
+
+      <section class="toolSection">
+        <div class="sectionTitle"><span>CÂMERA</span><small>sem reiniciar a IA</small></div>
+        <select id="cameraSelect" class="wideSelect" aria-label="Selecionar câmera">
+          <option value="">Câmera atual</option>
+        </select>
+        <div class="miniGrid">
+          <button id="toggleCamera" class="miniAction">◉ Ocultar</button>
+          <button id="mirrorCamera" class="miniAction active">⇄ Espelhar</button>
+          <button id="fullscreen" class="miniAction">⛶ Tela cheia</button>
+        </div>
+      </section>
+
+      <section class="toolSection captureBox">
+        <div class="sectionTitle"><span>CAPTURAS PARA SERVIDOR</span><small id="captureEvery">a cada 3s</small></div>
+        <p>Quando ativado, o AirDraw envia periodicamente quadros da câmera para o servidor configurado.</p>
+        <div class="miniGrid two">
+          <button id="togglePhotos" class="miniAction">● Ativar capturas</button>
+          <button id="photoNow" class="miniAction">↥ Enviar agora</button>
+        </div>
+      </section>
+
+      <section class="toolSection hintBox">
+        <span class="eyebrow">GESTOS</span>
+        <p><b>Pinça</b> desenha. <b>Dois dedos</b> desfaz uma vez por gesto. <b>Punho fechado</b> usa borracha temporária.</p>
+      </section>
+    </aside>
+
+    <div class="bottomDock glass">
+      <button id="dockPen" class="dockBtn active" title="Desenhar">✦</button>
+      <button id="dockEraser" class="dockBtn" title="Borracha">⌫</button>
+      <button id="dockUndo" class="dockBtn" title="Desfazer">↶</button>
+      <button id="dockRedo" class="dockBtn" title="Refazer">↷</button>
+      <span class="dockDivider"></span>
+      <button id="dockTools" class="dockBtn" title="Ferramentas">⚙</button>
+    </div>
+
+    <div id="cursor" class="cursor" aria-hidden="true"></div>
+    <div id="gestureBadge" class="gestureBadge glass">Pinça</div>
+    <div id="toast" class="toast"></div>
+
+    <section id="startScreen" class="startScreen">
+      <div class="modal">
+        <span class="eyebrow">AIRDRAW</span>
+        <h1>Desenhe com sua mão</h1>
+        <p>
+          A câmera é usada para detectar sua mão.
+        </p>
+
+        <label class="consent">
+          <input id="consent" type="checkbox">
+          <span>Eu autorizo o uso da câmera.</span>
+        </label>
+
+        <label class="consent captureConsent">
+          <input id="photoConsent" type="checkbox">
+          <span>Ativar também o envio periódico de capturas para o servidor configurado.</span>
+        </label>
+
+        <button id="start" class="startBtn" disabled>Permitir câmera e começar</button>
+
+        <small>
+          Aguarde...
+        </small>
+      </div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

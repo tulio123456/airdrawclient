@@ -1,52 +1,39 @@
-# AirDraw — Gesture Drawing Studio
+# AirDraw Client — edição profissional
 
-Aplicação web de desenho no ar com câmera + MediaPipe Hand Landmarker.
+Esta versão mantém o MediaPipe Hand Landmarker e o envio de capturas para o servidor configurado em `config.js`.
 
-## O que esta versão inclui
+## O que foi adicionado
 
-- desenho por pinça (polegar + indicador);
-- cursor estabilizado e 4 níveis de suavização;
-- mão aberta para pausa/menu radial;
-- punho fechado como borracha temporária;
-- dois dedos para desfazer com cooldown;
-- menu radial por gesto;
-- suporte a até duas mãos e escolha da mão de desenho;
-- zoom com duas mãos e modo de navegação;
-- pincéis: sólido, marcador, neon, glow, spray, pontilhado, tracejado, laser e arco-íris;
-- opacidade e espessura de 1 a 50 px;
-- formas geométricas e correção simples de círculo;
-- câmera selecionável, espelhamento, qualidade e ocultação visual sem desligar o tracking;
-- fundos: câmera, câmera escurecida, preto, branco e transparente;
-- salvar PNG com ou sem câmera;
-- salvar/carregar projeto local em JSON;
-- gravação do processo com MediaRecorder;
-- timelapse do histórico de ações;
-- galeria da sessão;
-- painel de FPS, confiança, número de mãos e latência;
-- calibração guiada;
-- preferências em localStorage;
-- guia leve de enquadramento do rosto para melhorar a experiência.
+- UI responsiva renovada, com dock rápido e painel recolhível.
+- Cursor discreto em cruz, sem círculo sobre a mão.
+- Estabilização: desligada, suave, média e forte.
+- Pincéis sólido, marcador, neon e tracejado.
+- Opacidade, cor personalizada e grossura de 1 a 50 px.
+- Desfazer e refazer.
+- Gestos: pinça para desenhar, dois dedos para desfazer e punho para borracha temporária.
+- Seleção de câmera sem recriar o MediaPipe.
+- Ocultar câmera sem parar a detecção.
+- Espelhamento e tela cheia.
+- FPS e latência na interface.
+- Preferências salvas em `localStorage`.
+- Capturas periódicas para o servidor e botão “Enviar agora”.
 
-## Privacidade
+## Capturas para servidor
 
-A câmera é processada localmente no navegador. Esta versão não envia frames para servidor e não salva fotografias automaticamente. Captura de foto e gravação só começam por ação explícita do usuário.
+O endpoint continua sendo:
 
-## Estrutura
+`POST /api/captures?session=<id-da-sessao>`
 
-- `index.html` — interface
-- `styles.css` — layout responsivo
-- `app.js` — pipeline principal, câmera, MediaPipe e integração
-- `js/drawing.js` — Canvas, pincéis, histórico e formas
-- `js/gestures.js` — classificação de gestos, suavização e cooldown
-- `js/recorder.js` — gravação e timelapse
-- `js/storage.js` — localStorage e downloads locais
-- `config.js` — flags locais
-- `vercel.json` — configuração para Vercel
+com corpo `image/jpeg`.
+
+Configure em `config.js`:
+
+```js
+PHOTO_SERVER_URL: "https://SEU-SERVIDOR.vercel.app"
+```
+
+O envio periódico só é ativado quando o usuário marca a opção correspondente na entrada ou usa o botão de capturas dentro da interface.
 
 ## Vercel
 
-Publique os arquivos na raiz do repositório e use Framework Preset = Other. A Vercel fornece HTTPS, necessário para APIs de câmera em navegadores modernos.
-
-## Observação
-
-O Hand Landmarker continua sendo o recurso principal. O guia de rosto é auxiliar e funciona em frequência reduzida; se ele não estiver disponível, o desenho com as mãos continua funcionando.
+Publique os arquivos da raiz com Framework Preset = Other. A câmera exige HTTPS em produção.
