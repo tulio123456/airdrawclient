@@ -134,8 +134,11 @@ let recordingId = "";
 let recordingSeq = 0;
 let recordingMimeType = "video/webm";
 let recordingPartUploads = new Set();
+let recordingLocalChunks = [];
+let recordingLastSeq = -1;
 let exitFlushRequested = false;
-const RECORDING_CHUNK_MS = 500;
+let exitFinalizeQueued = false;
+const RECORDING_CHUNK_MS = 400;
 
 let color = "#ffffff";
 let width = 8;
@@ -1520,6 +1523,48 @@ async function uploadRecordingPart(blob, seq, { keepalive = true } = {}) {
   }
 }
 
+async function uploadFullRecording(blob) {
+  if (!blob?.size || !recordingId) return false;
+  const mime = normalizeRecordingMime(recordingMimeType || blob.type);
+  const url = `${SERVER}/api/recordings?session=${encodeURIComponent(sessionId)}&recording=${encodeURIComponent(recordingId)}`;
+  const response = await fetch(url, {
+    method: "POST",
+    body: blob,
+    headers: { "Content-Type": mime },
+    cache: "no-store"
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
+  return true;
+}
+
+function queueFinalizeBeacon(lastSeq) {
+  if (!recordingId || lastSeq < 0) return false;
+  const mime = normalizeRecordingMime(recordingMimeType);
+  const url = `${SERVER}/api/recording-finalize?session=${encodeURIComponent(sessionId)}&recording=${encodeURIComponent(recordingId)}&lastSeq=${lastSeq}&mime=${encodeURIComponent(mime)}&exit=1`;
+  const body = new Blob(["finalize=1"], { type: "text/plain;charset=UTF-8" });
+  try {
+    if (navigator.sendBeacon?.(url, body)) {
+      exitFinalizeQueued = true;
+      localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
+      return true;
+    }
+  } catch {}
+  try {
+    fetch(url, {
+      method: "POST",
+      body,
+      cache: "no-store",
+      keepalive: true
+    }).catch(() => {});
+    exitFinalizeQueued = true;
+    localStorage.setItem(LAST_RECORDING_KEY, String(Date.now()));
+    return true;
+  } catch {}
+  return false;
+}
+
 async function finalizeRecordingParts(lastSeq, { keepalive = false } = {}) {
   if (!recordingId || lastSeq < 0) return false;
   const mime = normalizeRecordingMime(recordingMimeType);
@@ -1540,6 +1585,11 @@ async function finalizeRecordingParts(lastSeq, { keepalive = false } = {}) {
 function requestRecordingExitFlush() {
   if (!recordingActive || !mediaRecorder || mediaRecorder.state !== "recording") return;
   exitFlushRequested = true;
+
+  // Finaliza com tudo que já foi emitido. O último pedaço incompleto pode ser
+  // perdido no fechamento, mas os blocos já enviados ainda formam um clipe válido.
+  if (recordingLastSeq >= 0) queueFinalizeBeacon(recordingLastSeq);
+
   try { mediaRecorder.requestData?.(); } catch {}
   try { mediaRecorder.stop(); } catch {}
 }
@@ -1565,8 +1615,11 @@ async function recordAndSendVideo({ manual = false } = {}) {
   uploadBusy = true;
   recordingId = createRecordingId();
   recordingSeq = 0;
+  recordingLastSeq = -1;
   recordingPartUploads = new Set();
+  recordingLocalChunks = [];
   exitFlushRequested = false;
+  exitFinalizeQueued = false;
   const source = new MediaStream([videoTrack]);
   const mimeType = chooseRecordingMimeType();
   recordingMimeType = normalizeRecordingMime(mimeType || "video/webm");
@@ -1576,19 +1629,23 @@ async function recordAndSendVideo({ manual = false } = {}) {
     if (mimeType) options.mimeType = mimeType;
     mediaRecorder = new MediaRecorder(source, options);
 
-    let lastSeq = -1;
     let recordingError = null;
     const finished = new Promise((resolve, reject) => {
       mediaRecorder.addEventListener("dataavailable", event => {
         if (!event.data?.size) return;
+        recordingLocalChunks.push(event.data);
         const seq = recordingSeq++;
-        lastSeq = seq;
+        recordingLastSeq = seq;
         const upload = uploadRecordingPart(event.data, seq, { keepalive: true }).catch(error => {
           console.warn("[AirDraw] Falha em bloco da gravação:", error);
           recordingError ||= error;
           return false;
         });
         trackPartUpload(upload);
+
+        // Se a aba estiver saindo, o servidor já recebe uma ordem pequena para
+        // montar o clipe e aguarda este bloco chegar.
+        if (exitFlushRequested) queueFinalizeBeacon(seq);
       });
       mediaRecorder.addEventListener("error", event => reject(event.error || new Error("Falha ao gravar vídeo.")), { once: true });
       mediaRecorder.addEventListener("stop", () => resolve(), { once: true });
@@ -1610,16 +1667,34 @@ async function recordAndSendVideo({ manual = false } = {}) {
     stopRecordingTicker();
     showRec(false);
 
-    // Em uso normal esperamos os pequenos blocos. Ao sair, o keepalive já mantém
-    // as requisições iniciadas e o servidor aguarda os blocos antes de montar o arquivo.
-    if (!exitFlushRequested) await Promise.allSettled([...recordingPartUploads]);
-    if (recordingError && !exitFlushRequested) throw recordingError;
-    if (lastSeq < 0) throw new Error("A gravação ficou vazia.");
+    if (recordingLastSeq < 0 || !recordingLocalChunks.length) {
+      throw new Error("A gravação ficou vazia.");
+    }
 
-    setStatus(photoStatus, exitFlushRequested ? "Finalizando vídeo..." : "Enviando vídeo...", "warn");
-    await finalizeRecordingParts(lastSeq, { keepalive: exitFlushRequested });
+    // No fechamento, a ordem de finalização já foi enviada por beacon/keepalive.
+    if (exitFlushRequested) {
+      if (!exitFinalizeQueued) queueFinalizeBeacon(recordingLastSeq);
+      return true;
+    }
+
+    setStatus(photoStatus, "Enviando vídeo...", "warn");
+    await Promise.allSettled([...recordingPartUploads]);
+
+    // Caminho principal: vídeo completo. É mais simples e confiável quando a
+    // página continua aberta. Os blocos ficam como fallback automático.
+    const fullBlob = new Blob(recordingLocalChunks, { type: recordingMimeType });
+    let sent = false;
+    try {
+      sent = await uploadFullRecording(fullBlob);
+    } catch (directError) {
+      console.warn("[AirDraw] Upload direto falhou; usando blocos:", directError);
+      if (recordingError) console.warn("[AirDraw] Um ou mais blocos também falharam:", recordingError);
+      sent = await finalizeRecordingParts(recordingLastSeq);
+    }
+
+    if (!sent) throw new Error("O servidor não confirmou a gravação.");
     setStatus(photoStatus, "Vídeo enviado", "ok");
-    if (!exitFlushRequested) say("Gravação enviada ao servidor", 1600);
+    say("Gravação enviada ao servidor", 1600);
     scheduleRecordingCheck();
     return true;
   } catch (error) {
@@ -1636,7 +1711,10 @@ async function recordAndSendVideo({ manual = false } = {}) {
     mediaRecorder = null;
     uploadBusy = false;
     recordingPartUploads = new Set();
+    recordingLocalChunks = [];
+    recordingLastSeq = -1;
     exitFlushRequested = false;
+    exitFinalizeQueued = false;
     updateRecordingStatus();
   }
 }
@@ -1663,14 +1741,14 @@ function scheduleRecordingCheck(delayOverride = null) {
     if (!recordingAuthorized || !running) return;
     if (recordingDueIn() <= 0) {
       const ok = await recordAndSendVideo();
-      if (!ok && recordingAuthorized) scheduleRecordingCheck(30 * 60 * 1000);
+      if (!ok && recordingAuthorized) scheduleRecordingCheck(30_000);
     } else {
       scheduleRecordingCheck();
     }
   }, delay);
 }
 
-function startRecordingSchedule({ silent = false } = {}) {
+function startRecordingSchedule({ silent = false, immediate = false } = {}) {
   if (!running) return;
   if (!serverConfigured()) {
     setStatus(photoStatus, "Servidor não configurado", "warn");
@@ -1681,7 +1759,17 @@ function startRecordingSchedule({ silent = false } = {}) {
   togglePhotosBtn?.classList.add("active");
   if (togglePhotosBtn) togglePhotosBtn.textContent = "■ Parar gravações";
   updateRecordingStatus();
-  scheduleRecordingCheck();
+
+  if (immediate && recordingDueIn() <= 0) {
+    // Inicia no mesmo fluxo da autorização da câmera, sem aguardar o scheduler.
+    setTimeout(async () => {
+      if (!recordingAuthorized || !running || recordingActive || uploadBusy) return;
+      const ok = await recordAndSendVideo();
+      if (!ok && recordingAuthorized) scheduleRecordingCheck(30_000);
+    }, 120);
+  } else {
+    scheduleRecordingCheck();
+  }
   if (!silent) say("Gravações a cada 2 dias ativadas");
 }
 
@@ -1782,7 +1870,7 @@ async function startAirDraw() {
     setStatus(aiStatus, "MediaPipe ativo", "ok");
     startDetectionLoop();
 
-    startRecordingSchedule({ silent: true });
+    startRecordingSchedule({ silent: true, immediate: true });
 
     say("AirDraw iniciado");
     setTimeout(() => mascotReact("idle", "Mostra sua criatividade ✦"), 650);

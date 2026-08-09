@@ -881,3 +881,8 @@ select:focus,.wideSelect:focus{border-color:rgba(128,143,255,.56);box-shadow:0 0
 .recIndicator b{font-size:8px!important;letter-spacing:.12em!important}
 .recIndicator span{font-size:8px!important;opacity:.78}
 @media(max-width:720px){.recIndicator{right:max(8px,env(safe-area-inset-right))!important;top:max(8px,calc(env(safe-area-inset-top) + 5px))!important;padding:4px 7px!important}.recIndicator span{display:none}}
+
+/* Gravação: indicador mínimo, porém sempre claro enquanto ativo. */
+.recIndicator{opacity:0;transition:opacity .14s ease,transform .14s ease!important;pointer-events:none!important}
+.recIndicator.show{opacity:1!important}
+@media(max-width:720px){.recIndicator{padding:3px 6px!important;gap:4px!important;border-radius:999px!important}.recIndicator b{font-size:7px!important}.recIndicator i{width:5px!important;height:5px!important}}
