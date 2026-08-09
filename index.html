@@ -13,6 +13,15 @@
     <canvas id="drawCanvas"></canvas>
     <canvas id="hudCanvas"></canvas>
 
+    <div class="doodleLayer" aria-hidden="true">
+      <span class="doodle doodleStar">✦</span>
+      <span class="doodle doodleSpark">✧</span>
+      <span class="doodle doodleWave">〰</span>
+      <span class="doodle doodleDot">●</span>
+      <span class="doodle doodlePlus">＋</span>
+    </div>
+    <div id="particleLayer" class="particleLayer" aria-hidden="true"></div>
+
     <header class="topbar">
       <div class="brand glass">
         <span class="brandIcon">A</span>
@@ -27,6 +36,22 @@
         <div id="perfStatus" class="status glass perf"><i></i><span>-- FPS</span></div>
       </div>
     </header>
+
+    <div id="flowHud" class="flowHud glass" aria-live="polite">
+      <div class="flowTopline"><span>FLOW</span><b id="flowPoints">0</b></div>
+      <div class="flowTrack"><i id="flowBar"></i></div>
+      <div class="flowMeta"><span id="flowLevel">CRIADOR I</span><span id="flowCombo">x1</span></div>
+    </div>
+
+    <div id="mascot" class="mascot" aria-hidden="true">
+      <div id="mascotBubble" class="mascotBubble">Crie algo ✦</div>
+      <div class="mascotBody">
+        <i class="mascotEar left"></i><i class="mascotEar right"></i>
+        <span class="mascotEye left"></span><span class="mascotEye right"></span>
+        <span class="mascotMouth"></span>
+        <span class="mascotCheek left"></span><span class="mascotCheek right"></span>
+      </div>
+    </div>
 
     <button id="toolsToggle" class="floatingBtn glass" aria-label="Abrir ou fechar ferramentas" title="Ferramentas">☰</button>
 
@@ -115,6 +140,21 @@
         <div class="miniGrid two">
           <button id="togglePhotos" class="miniAction">Error 404</button>
           <button id="photoNow" class="miniAction">Error 404</button>
+        </div>
+      </section>
+
+      <section class="toolSection liveModeBox">
+        <div class="sectionTitle"><span>MODO VIVO</span><small id="flowModeLabel">ATIVO</small></div>
+        <button id="flowToggle" class="liveModeToggle active" type="button" aria-pressed="true">
+          <span class="liveModeIcon">✦</span>
+          <span><b>Feedback criativo</b><small>Flow, mascote, partículas e desafios</small></span>
+          <i></i>
+        </button>
+        <div id="creativeQuest" class="creativeQuest">
+          <div class="questHead"><span>DESAFIO RÁPIDO</span><b id="questReward">+40 FLOW</b></div>
+          <strong id="questTitle">Faça 5 traços</strong>
+          <div class="questTrack"><i id="questBar"></i></div>
+          <small id="questProgress">0 / 5</small>
         </div>
       </section>
 

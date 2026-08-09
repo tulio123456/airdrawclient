@@ -712,3 +712,43 @@ select:focus,.wideSelect:focus{border-color:rgba(128,143,255,.56);box-shadow:0 0
   /* O sweep é bonito no desktop, mas o alerta facial precisa ser leve no celular. */
   .faceAlertScan{display:none}
 }
+
+
+/* ===== AirDraw Modo Vivo — camada visual/interativa local ===== */
+.doodleLayer,.particleLayer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
+.doodle{position:absolute;color:rgba(190,198,255,.26);font-weight:900;filter:drop-shadow(0 0 12px rgba(118,132,255,.22));animation:doodleFloat 7s ease-in-out infinite}
+.doodleStar{left:4%;top:31%;font-size:18px;animation-delay:-1s}.doodleSpark{right:6%;top:26%;font-size:24px;animation-delay:-3.2s}
+.doodleWave{right:5%;bottom:26%;font-size:30px;transform:rotate(-12deg);animation-delay:-4.4s}.doodleDot{left:6%;bottom:27%;font-size:8px;animation-delay:-2.2s}.doodlePlus{right:22%;top:12%;font-size:15px;animation-delay:-5s}
+@keyframes doodleFloat{0%,100%{translate:0 0;rotate:-3deg;opacity:.45}50%{translate:0 -12px;rotate:5deg;opacity:.95}}
+
+.flowHud{position:absolute;z-index:31;top:72px;right:max(14px,env(safe-area-inset-right));width:150px;padding:10px 11px;border-radius:16px;pointer-events:none;transition:opacity .2s ease,transform .2s ease,border-color .2s ease}
+.flowTopline,.flowMeta{display:flex;align-items:center;justify-content:space-between;gap:8px}.flowTopline span{font-size:7px;letter-spacing:.18em;font-weight:950;color:#a7b0ff}.flowTopline b{font-size:15px;line-height:1;color:#fff}
+.flowTrack{height:5px;margin:8px 0 6px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}.flowTrack i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#657cff,#b46fff,#ff76a6);box-shadow:0 0 16px rgba(139,114,255,.45);transition:width .28s cubic-bezier(.2,.8,.2,1)}
+.flowMeta{font-size:7px;font-weight:900;color:#8792a6;letter-spacing:.07em}.flowMeta span:last-child{color:#ffd06d;font-size:9px}
+.flowHud.pulse{animation:flowPulse .34s ease}.flowHud.disabled{opacity:.4;transform:scale(.96)}
+@keyframes flowPulse{50%{transform:scale(1.045);border-color:rgba(163,127,255,.55)}}
+
+.mascot{position:absolute;z-index:32;right:max(18px,env(safe-area-inset-right));bottom:max(84px,calc(env(safe-area-inset-bottom) + 84px));width:62px;height:62px;pointer-events:none;filter:drop-shadow(0 15px 26px rgba(0,0,0,.34));animation:mascotFloat 3.5s ease-in-out infinite;transition:opacity .2s ease,transform .2s ease}
+.mascotBody{position:absolute;inset:8px 5px 3px;border-radius:48% 48% 45% 45%/44% 44% 56% 56%;background:linear-gradient(145deg,#788aff,#a96fff 65%,#ff7ead);border:1px solid rgba(255,255,255,.28);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 10px 30px rgba(107,90,255,.23)}
+.mascotEar{position:absolute;top:-7px;width:17px;height:20px;background:#7d8cff;border-radius:70% 20% 55% 35%;z-index:-1}.mascotEar.left{left:4px;rotate:-20deg}.mascotEar.right{right:4px;rotate:20deg;scale:-1 1}
+.mascotEye{position:absolute;top:19px;width:7px;height:9px;border-radius:50%;background:#101526;box-shadow:inset 0 2px 0 rgba(255,255,255,.45)}.mascotEye.left{left:14px}.mascotEye.right{right:14px}
+.mascotMouth{position:absolute;left:50%;top:33px;width:12px;height:6px;border:2px solid #17192b;border-top:0;border-radius:0 0 12px 12px;transform:translateX(-50%)}
+.mascotCheek{position:absolute;top:31px;width:6px;height:3px;border-radius:99px;background:rgba(255,190,210,.72)}.mascotCheek.left{left:8px}.mascotCheek.right{right:8px}
+.mascotBubble{position:absolute;right:50px;top:-16px;min-width:88px;max-width:132px;padding:7px 9px;border:1px solid rgba(255,255,255,.12);border-radius:12px 12px 3px 12px;background:rgba(9,13,21,.94);color:#f6f7ff;font-size:8px;font-weight:850;text-align:center;opacity:0;transform:translateY(5px) scale(.94);transition:.18s;white-space:nowrap;box-shadow:0 14px 34px rgba(0,0,0,.32)}
+.mascot.talk .mascotBubble{opacity:1;transform:none}.mascot.talk .mascotBody{animation:mascotPop .45s ease}.mascot[data-mood="draw"] .mascotEye{height:5px;top:21px}.mascot[data-mood="color"] .mascotBody{filter:hue-rotate(28deg)}.mascot[data-mood="quest"] .mascotBody{box-shadow:0 0 0 6px rgba(255,211,105,.08),0 0 36px rgba(255,207,87,.3)}.mascot[data-mood="face"] .mascotMouth{border-top:2px solid #17192b;border-bottom:0;border-radius:12px 12px 0 0;top:36px}
+@keyframes mascotFloat{0%,100%{translate:0 0}50%{translate:0 -7px}}@keyframes mascotPop{50%{transform:scale(1.13) rotate(-4deg)}}
+
+.liveModeBox{position:relative}.liveModeToggle{width:100%;display:grid;grid-template-columns:35px 1fr 22px;align-items:center;gap:9px;padding:9px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.028);color:#cbd2dd;text-align:left;cursor:pointer}.liveModeToggle.active{border-color:rgba(133,145,255,.4);background:linear-gradient(135deg,rgba(105,121,255,.12),rgba(168,103,255,.09))}.liveModeIcon{display:grid;place-items:center;width:35px;height:35px;border-radius:11px;background:linear-gradient(145deg,#687cff,#aa70ff);color:#fff;font-size:17px;box-shadow:0 8px 24px rgba(119,105,255,.22)}.liveModeToggle span:nth-child(2){display:grid;gap:2px}.liveModeToggle b{font-size:9px;color:#f5f6fb}.liveModeToggle small{font-size:7px;color:#7f899c;line-height:1.3}.liveModeToggle>i{position:relative;width:22px;height:13px;border-radius:99px;background:#2a3240}.liveModeToggle>i:after{content:"";position:absolute;top:2px;left:2px;width:9px;height:9px;border-radius:50%;background:#8791a2;transition:.18s}.liveModeToggle.active>i{background:#586df2}.liveModeToggle.active>i:after{left:11px;background:#fff}
+.creativeQuest{margin-top:9px;padding:10px;border-radius:13px;border:1px solid rgba(255,255,255,.075);background:radial-gradient(circle at 95% 0,rgba(145,103,255,.11),transparent 46%),rgba(2,5,10,.2);transition:.22s}.questHead{display:flex;justify-content:space-between;gap:8px;align-items:center}.questHead span,.questHead b{font-size:7px;letter-spacing:.12em;font-weight:950}.questHead span{color:#929db0}.questHead b{color:#ffd06d}.creativeQuest>strong{display:block;margin:7px 0 8px;font-size:10px}.questTrack{height:4px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}.questTrack i{display:block;height:100%;width:0;background:linear-gradient(90deg,#657cff,#b46fff);border-radius:inherit;transition:width .25s ease}.creativeQuest>small{display:block;margin-top:5px;text-align:right;color:#737e91;font-size:7px}.creativeQuest.complete{border-color:rgba(255,211,105,.52);box-shadow:0 0 28px rgba(255,199,73,.14);animation:questComplete .6s ease}@keyframes questComplete{50%{transform:scale(1.025)}}
+
+.flowParticle{position:absolute;left:0;top:0;width:7px;height:7px;border-radius:2px;background:#8c9cff;box-shadow:0 0 10px currentColor;translate:calc(var(--x) - 50%) calc(var(--y) - 50%);scale:var(--s);animation:flowBurst .62s cubic-bezier(.18,.7,.2,1) forwards}.flowParticle.color{background:#ff7cad}.flowParticle.quest{width:9px;height:9px;border-radius:50%;background:#ffd06d}@keyframes flowBurst{0%{opacity:1;transform:translate(0,0) scale(.7) rotate(0)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.1) rotate(160deg)}}
+.flow-off .doodleLayer,.flow-off .mascot,.flow-off .particleLayer{opacity:0!important}.flow-off .creativeQuest{opacity:.45}
+
+@media(max-width:720px){
+  .flowHud{top:56px;right:max(8px,env(safe-area-inset-right));width:120px;padding:8px 9px;border-radius:13px}.flowTopline b{font-size:13px}.flowTrack{margin:6px 0 5px}.flowMeta{font-size:6px}
+  .mascot{right:max(10px,env(safe-area-inset-right));bottom:calc(max(8px,env(safe-area-inset-bottom)) + 62px);width:52px;height:52px}.mascotBubble{right:43px;top:-15px;font-size:7px;min-width:76px}.mascotBody{inset:7px 4px 2px}.mascotEye{top:17px}.mascotEye.left{left:12px}.mascotEye.right{right:12px}.mascotMouth{top:29px}
+  .doodleStar{left:2%;top:23%}.doodleSpark{right:3%;top:20%}.doodleWave{right:3%;bottom:20%}.doodlePlus{display:none}
+  .flowParticle{width:6px;height:6px}
+}
+@media(max-width:390px){.flowHud{width:108px}.flowMeta span:first-child{max-width:67px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mascotBubble{display:none}}
+@media(prefers-reduced-motion:reduce){.doodle,.mascot,.flowParticle,.flowHud.pulse,.creativeQuest.complete,.mascot.talk .mascotBody{animation:none!important}}

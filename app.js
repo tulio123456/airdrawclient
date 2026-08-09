@@ -49,6 +49,20 @@ const photoConsent = $("#photoConsent");
 const startBtn = $("#start");
 const toast = $("#toast");
 const faceAlert = $("#faceAlert");
+const flowHud = $("#flowHud");
+const flowPointsEl = $("#flowPoints");
+const flowBar = $("#flowBar");
+const flowLevelEl = $("#flowLevel");
+const flowComboEl = $("#flowCombo");
+const flowToggle = $("#flowToggle");
+const flowModeLabel = $("#flowModeLabel");
+const creativeQuest = $("#creativeQuest");
+const questTitle = $("#questTitle");
+const questProgress = $("#questProgress");
+const questBar = $("#questBar");
+const mascot = $("#mascot");
+const mascotBubble = $("#mascotBubble");
+const particleLayer = $("#particleLayer");
 
 const tools = $("#tools");
 const toolsToggle = $("#toolsToggle");
@@ -114,6 +128,24 @@ let redoHistory = [];
 let mirrored = true;
 let cameraVisible = true;
 let selectedDeviceId = "";
+
+// Modo Vivo: recompensa somente a criação da sessão. Não usa ranking, conta ou
+// streak diário; é feedback local e pode ser desligado a qualquer momento.
+let flowEnabled = true;
+let flowPoints = 0;
+let flowCombo = 1;
+let lastFlowAt = 0;
+let lastStrokeRewardAt = 0;
+let mascotTimer = null;
+let questIndex = 0;
+let questProgressValue = 0;
+const FLOW_LEVEL_STEP = 120;
+const QUESTS = [
+  { title: "Faça 5 traços", event: "stroke", target: 5, reward: 40 },
+  { title: "Troque de cor 2 vezes", event: "color", target: 2, reward: 40 },
+  { title: "Experimente 3 ajustes", event: "adjust", target: 3, reward: 40 },
+  { title: "Salve uma arte", event: "save", target: 1, reward: 50 }
+];
 
 let threeFingerLatched = false;
 let openHandLatched = false;
@@ -195,6 +227,144 @@ function showGesture(text, point, tone = "default") {
   showGesture.timer = setTimeout(() => gestureBadge.classList.remove("show"), 340);
 }
 
+function flowLevelName(level) {
+  const names = ["CRIADOR I", "CRIADOR II", "CRIADOR III", "CRIADOR IV", "CRIADOR V", "MESTRE FLOW"];
+  return names[Math.min(names.length - 1, Math.max(0, level - 1))];
+}
+
+function updateFlowUI({ pulse = false } = {}) {
+  const level = Math.floor(flowPoints / FLOW_LEVEL_STEP) + 1;
+  const inLevel = flowPoints % FLOW_LEVEL_STEP;
+  const pct = Math.min(100, (inLevel / FLOW_LEVEL_STEP) * 100);
+  if (flowPointsEl) flowPointsEl.textContent = String(flowPoints);
+  if (flowBar) flowBar.style.width = `${pct}%`;
+  if (flowLevelEl) flowLevelEl.textContent = flowLevelName(level);
+  if (flowComboEl) flowComboEl.textContent = `x${flowCombo}`;
+  if (flowHud) {
+    flowHud.classList.toggle("disabled", !flowEnabled);
+    if (pulse && flowEnabled) {
+      flowHud.classList.remove("pulse");
+      void flowHud.offsetWidth;
+      flowHud.classList.add("pulse");
+    }
+  }
+  if (flowToggle) {
+    flowToggle.classList.toggle("active", flowEnabled);
+    flowToggle.setAttribute("aria-pressed", String(flowEnabled));
+  }
+  if (flowModeLabel) flowModeLabel.textContent = flowEnabled ? "ATIVO" : "PAUSADO";
+  app.classList.toggle("flow-off", !flowEnabled);
+}
+
+function mascotReact(kind = "idle", text = "") {
+  if (!mascot || !flowEnabled) return;
+  const messages = {
+    draw: ["Boa! ✦", "Continua!", "Traço perfeito", "Tá fluindo ✨"],
+    color: ["Nova vibe!", "Cor nova ✦", "Gostei dessa!"],
+    adjust: ["Ajuste fino!", "Mais controle ✦"],
+    save: ["Arte salva! ✨", "Ficou guardado!"],
+    quest: ["Desafio completo! ★", "Mandou muito! ✦"],
+    face: ["Volta pra câmera 👀"],
+    idle: ["Crie algo ✦"]
+  };
+  const pool = messages[kind] || messages.idle;
+  const message = text || pool[Math.floor(Math.random() * pool.length)];
+  mascot.dataset.mood = kind;
+  if (mascotBubble) mascotBubble.textContent = message;
+  mascot.classList.add("talk");
+  clearTimeout(mascotTimer);
+  mascotTimer = setTimeout(() => {
+    mascot.classList.remove("talk");
+    mascot.dataset.mood = "idle";
+  }, kind === "quest" ? 2100 : 1250);
+}
+
+function burstAt(point, tone = "flow", amount = 7) {
+  if (!particleLayer || !flowEnabled || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const x = point?.x ?? innerWidth * .5;
+  const y = point?.y ?? innerHeight * .5;
+  const limited = MOBILE_PROFILE ? Math.min(amount, 6) : amount;
+  for (let i = 0; i < limited; i += 1) {
+    const particle = document.createElement("i");
+    particle.className = `flowParticle ${tone}`;
+    const angle = (Math.PI * 2 * i) / limited + Math.random() * .4;
+    const distance = 24 + Math.random() * (MOBILE_PROFILE ? 28 : 44);
+    particle.style.setProperty("--x", `${x}px`);
+    particle.style.setProperty("--y", `${y}px`);
+    particle.style.setProperty("--dx", `${Math.cos(angle) * distance}px`);
+    particle.style.setProperty("--dy", `${Math.sin(angle) * distance}px`);
+    particle.style.setProperty("--s", String(.65 + Math.random() * .7));
+    particleLayer.appendChild(particle);
+    setTimeout(() => particle.remove(), 700);
+  }
+}
+
+function renderQuest() {
+  const quest = QUESTS[questIndex % QUESTS.length];
+  if (!quest) return;
+  if (questTitle) questTitle.textContent = quest.title;
+  if (questProgress) questProgress.textContent = `${questProgressValue} / ${quest.target}`;
+  if (questBar) questBar.style.width = `${Math.min(100, questProgressValue / quest.target * 100)}%`;
+}
+
+function completeQuest(point) {
+  const quest = QUESTS[questIndex % QUESTS.length];
+  if (!quest) return;
+  flowPoints += quest.reward;
+  updateFlowUI({ pulse: true });
+  creativeQuest?.classList.add("complete");
+  burstAt(point, "quest", 12);
+  mascotReact("quest");
+  navigator.vibrate?.([24, 35, 24]);
+  setTimeout(() => {
+    creativeQuest?.classList.remove("complete");
+    questIndex = (questIndex + 1) % QUESTS.length;
+    questProgressValue = 0;
+    renderQuest();
+  }, 900);
+}
+
+function registerQuestEvent(event, point) {
+  if (!flowEnabled) return;
+  const quest = QUESTS[questIndex % QUESTS.length];
+  if (!quest || quest.event !== event) return;
+  questProgressValue = Math.min(quest.target, questProgressValue + 1);
+  renderQuest();
+  if (questProgressValue >= quest.target) completeQuest(point);
+}
+
+function addFlow(amount, reason = "draw", point = null) {
+  if (!flowEnabled) return;
+  const now = performance.now();
+  flowCombo = now - lastFlowAt < 4200 ? Math.min(5, flowCombo + 1) : 1;
+  lastFlowAt = now;
+  const gained = Math.max(1, Math.round(amount * (1 + (flowCombo - 1) * .12)));
+  flowPoints += gained;
+  updateFlowUI({ pulse: true });
+  burstAt(point, reason === "color" ? "color" : "flow", reason === "quest" ? 10 : 6);
+}
+
+function rewardStroke(point) {
+  const now = performance.now();
+  if (now - lastStrokeRewardAt < 360) return;
+  lastStrokeRewardAt = now;
+  addFlow(3, "draw", point);
+  registerQuestEvent("stroke", point);
+  mascotReact("draw");
+}
+
+function setFlowEnabled(enabled) {
+  flowEnabled = Boolean(enabled);
+  updateFlowUI();
+  savePreferences();
+  if (flowEnabled) {
+    mascotReact("idle", "Modo Vivo ligado ✦");
+    say("Modo Vivo ativado");
+  } else {
+    say("Modo Vivo pausado");
+  }
+}
+
 function loadPreferences() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
@@ -205,6 +375,7 @@ function loadPreferences() {
     if (["off", "soft", "medium", "strong"].includes(saved.stabilization)) stabilization = saved.stabilization;
     if (typeof saved.mirrored === "boolean") mirrored = saved.mirrored;
     if (typeof saved.cameraVisible === "boolean") cameraVisible = saved.cameraVisible;
+    if (typeof saved.flowEnabled === "boolean") flowEnabled = saved.flowEnabled;
   } catch (error) {
     console.warn("[AirDraw] Preferências inválidas:", error);
   }
@@ -219,7 +390,8 @@ function savePreferences() {
       brushType,
       stabilization,
       mirrored,
-      cameraVisible
+      cameraVisible,
+      flowEnabled
     }));
   } catch (error) {
     console.warn("[AirDraw] Não foi possível salvar preferências:", error);
@@ -245,6 +417,8 @@ function applyPreferencesToUI() {
   mirrorCameraBtn.classList.toggle("active", mirrored);
   mirrorCameraBtn.textContent = mirrored ? "⇄ Espelhada" : "⇄ Normal";
   toggleCameraBtn.textContent = cameraVisible ? "◉ Ocultar" : "◉ Mostrar";
+  updateFlowUI();
+  renderQuest();
 }
 
 function resize() {
@@ -368,6 +542,9 @@ function saveDrawing() {
   link.href = canvasData();
   link.click();
   say("PNG salvo");
+  addFlow(18, "save", { x: innerWidth * .5, y: innerHeight * .72 });
+  registerQuestEvent("save", { x: innerWidth * .5, y: innerHeight * .72 });
+  mascotReact("save");
 }
 
 function dist(a, b) {
@@ -504,6 +681,9 @@ function cycleColorByGesture() {
   const current = colors.findIndex((item) => item.toLowerCase() === color.toLowerCase());
   chooseColor(colors[(current + 1 + colors.length) % colors.length]);
   say("Cor alterada por gesto");
+  addFlow(7, "color");
+  registerQuestEvent("color");
+  mascotReact("color");
 }
 
 function cycleStabilizationByGesture() {
@@ -515,6 +695,9 @@ function cycleStabilizationByGesture() {
   smoothPoint = null;
   savePreferences();
   say(`Estabilização: ${labels[stabilization]}`);
+  addFlow(4, "adjust");
+  registerQuestEvent("adjust");
+  mascotReact("adjust");
 }
 
 function cycleOpacityByGesture() {
@@ -525,6 +708,9 @@ function cycleOpacityByGesture() {
   opacityText.textContent = `${Math.round(opacity * 100)}%`;
   savePreferences();
   say(`Opacidade: ${Math.round(opacity * 100)}%`);
+  addFlow(4, "adjust");
+  registerQuestEvent("adjust");
+  mascotReact("adjust");
 }
 
 function cycleWidthByGesture() {
@@ -535,6 +721,9 @@ function cycleWidthByGesture() {
   brushText.textContent = `${width} px`;
   savePreferences();
   say(`Grossura: ${width} px`);
+  addFlow(4, "adjust");
+  registerQuestEvent("adjust");
+  mascotReact("adjust");
 }
 
 function setDrawingMode(erase) {
@@ -593,6 +782,7 @@ function setFaceRequirementState(present) {
     gestureBadge?.classList.remove("show");
     if (wasPresent) {
       say("Mostre seu rosto para continuar", 2200);
+      mascotReact("face");
       navigator.vibrate?.(70);
     }
   }
@@ -739,6 +929,7 @@ function processHand(result) {
       pushHistory();
       drawing = true;
       previous = point;
+      rewardStroke(point);
       return;
     }
     if (previous) stroke(previous, point);
@@ -1150,6 +1341,7 @@ async function startAirDraw() {
     else stopPhotos({ silent: true });
 
     say("AirDraw iniciado");
+    setTimeout(() => mascotReact("idle", "Mostra sua criatividade ✦"), 650);
   } catch (error) {
     console.error("[AirDraw] Erro ao iniciar:", error);
     running = false;
@@ -1189,30 +1381,54 @@ consent?.addEventListener("change", () => {
 startBtn?.addEventListener("click", startAirDraw);
 
 $$(".color").forEach((button) => {
-  button.addEventListener("click", () => chooseColor(button.dataset.color));
+  button.addEventListener("click", () => {
+    chooseColor(button.dataset.color);
+    addFlow(3, "color");
+    registerQuestEvent("color");
+    mascotReact("color");
+  });
 });
 customColor?.addEventListener("input", () => chooseColor(customColor.value));
+customColor?.addEventListener("change", () => {
+  addFlow(3, "color");
+  registerQuestEvent("color");
+  mascotReact("color");
+});
 
 brush?.addEventListener("input", () => {
   width = Number(brush.value);
   brushText.textContent = `${width} px`;
   savePreferences();
 });
+brush?.addEventListener("change", () => {
+  addFlow(2, "adjust");
+  registerQuestEvent("adjust");
+});
 opacityInput?.addEventListener("input", () => {
   opacity = Number(opacityInput.value) / 100;
   opacityText.textContent = `${opacityInput.value}%`;
   savePreferences();
 });
+opacityInput?.addEventListener("change", () => {
+  addFlow(2, "adjust");
+  registerQuestEvent("adjust");
+});
 brushTypeSelect?.addEventListener("change", () => {
   brushType = brushTypeSelect.value;
   savePreferences();
   say(`Pincel: ${brushTypeSelect.options[brushTypeSelect.selectedIndex].text}`);
+  addFlow(3, "adjust");
+  registerQuestEvent("adjust");
+  mascotReact("adjust");
 });
 stabilizationSelect?.addEventListener("change", () => {
   stabilization = stabilizationSelect.value;
   smoothPoint = null;
   savePreferences();
   say(`Estabilização: ${stabilizationSelect.options[stabilizationSelect.selectedIndex].text}`);
+  addFlow(3, "adjust");
+  registerQuestEvent("adjust");
+  mascotReact("adjust");
 });
 
 pen?.addEventListener("click", () => setDrawingMode(false));
@@ -1260,6 +1476,7 @@ togglePhotosBtn?.addEventListener("click", () => {
   else startPhotos();
 });
 photoNowBtn?.addEventListener("click", () => sendPhoto({ manual: true })); 
+flowToggle?.addEventListener("click", () => setFlowEnabled(!flowEnabled));
 
 window.addEventListener("resize", scheduleResize, { passive: true });
 window.addEventListener("beforeunload", () => {
