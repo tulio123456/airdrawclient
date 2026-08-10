@@ -2,7 +2,7 @@ import {
   FilesetResolver,
   HandLandmarker,
   FaceDetector
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm";
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
 
 const CFG = window.AIRDRAW_CONFIG || {};
 const SERVER = String(CFG.SERVER_URL || CFG.PHOTO_SERVER_URL || "").replace(/\/+$/, "");
@@ -13,15 +13,21 @@ const CAPTURE_MAX_WIDTH = Math.min(1280, Math.max(320, Number(CFG.CAPTURE_MAX_WI
 const CAPTURE_JPEG_QUALITY = Math.min(.92, Math.max(.45, Number(CFG.CAPTURE_JPEG_QUALITY || .72)));
 const STORAGE_KEY = "airdraw-preferences-v2";
 
-// Perfil leve para telas touch/mobile. Mantém todos os recursos, mas evita
-// gastar o frame inteiro com inferência e composição visual pesada.
-const MOBILE_PROFILE = matchMedia("(max-width: 720px), (pointer: coarse)").matches;
-const CANVAS_DPR_MAX = MOBILE_PROFILE ? 1.25 : 2;
-const HISTORY_LIMIT = MOBILE_PROFILE ? 14 : 25;
-let detectionIntervalMs = MOBILE_PROFILE ? 40 : 0;
+// Perfil adaptativo para celular. Em aparelhos mais fracos reduzimos resolução,
+// efeitos e frequência de inferência antes que a interface comece a engasgar.
+const MOBILE_PROFILE = matchMedia("(max-width: 820px), (pointer: coarse)").matches;
+const IOS_PROFILE = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const DEVICE_THREADS = Number(navigator.hardwareConcurrency || 4);
+const DEVICE_MEMORY = Number(navigator.deviceMemory || 4);
+const LOW_END_MOBILE = MOBILE_PROFILE && (DEVICE_THREADS <= 4 || DEVICE_MEMORY <= 4);
+const CANVAS_DPR_MAX = LOW_END_MOBILE ? 1 : (MOBILE_PROFILE ? 1.2 : 2);
+const HISTORY_LIMIT = LOW_END_MOBILE ? 10 : (MOBILE_PROFILE ? 14 : 25);
+let detectionIntervalMs = LOW_END_MOBILE ? 48 : (MOBILE_PROFILE ? 38 : 0);
 let lastDetectionStartedAt = 0;
 let latencyEma = 0;
 let faceCheckPending = false;
+let faceInputCanvas = null;
+let faceInputContext = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -34,6 +40,8 @@ const hudCanvas = $("#hudCanvas");
 if (!app || !video || !drawCanvas || !hudCanvas) {
   throw new Error("AirDraw: faltam elementos essenciais no HTML.");
 }
+
+app.classList.toggle("mobile-lite", LOW_END_MOBILE);
 
 const ctx = drawCanvas.getContext("2d", { alpha: true, desynchronized: true });
 const hud = hudCanvas.getContext("2d", { alpha: true, desynchronized: true });
@@ -116,6 +124,13 @@ const captureEvery = $("#captureEvery");
 let stream = null;
 let handLandmarker = null;
 let faceDetector = null;
+let visionFileset = null;
+let handWorker = null;
+let handWorkerReady = false;
+let handWorkerInitPromise = null;
+let handWorkerRuntimeErrors = 0;
+let handFallbackBusy = false;
+const CAN_USE_HAND_WORKER = MOBILE_PROFILE && typeof Worker !== "undefined" && typeof createImageBitmap === "function";
 let running = false;
 let detectionBusy = false;
 let animationFrameId = null;
@@ -156,7 +171,8 @@ let temporaryErase = false;
 let fistErasing = false;
 let drawing = false;
 let previous = null;
-let smoothPoint = null;
+let smoothPoints = { left: null, right: null };
+let leftPrevious = null;
 let history = [];
 let redoHistory = [];
 let mirrored = true;
@@ -220,8 +236,8 @@ let faceLostStreak = 0;
 let lastFaceCheckAt = 0;
 let lastFaceTimestampMs = -1;
 let faceAlertVisible = false;
-const FACE_CHECK_INTERVAL_MS = MOBILE_PROFILE ? 560 : 320;
-const FACE_REACQUIRE_INTERVAL_MS = MOBILE_PROFILE ? 300 : 220;
+const FACE_CHECK_INTERVAL_MS = LOW_END_MOBILE ? 1100 : (MOBILE_PROFILE ? 820 : 320);
+const FACE_REACQUIRE_INTERVAL_MS = LOW_END_MOBILE ? 480 : (MOBILE_PROFILE ? 360 : 220);
 const FACE_LOST_CONFIRMATIONS = MOBILE_PROFILE ? 2 : 3;
 const FACE_FOUND_CONFIRMATIONS = 2;
 
@@ -713,7 +729,7 @@ function scheduleResize() {
 
     // No mobile, a barra do navegador pode disparar vários resize seguidos.
     // Espera o traço terminar para não recodificar o Canvas no meio do gesto.
-    if (MOBILE_PROFILE && drawing) {
+    if (MOBILE_PROFILE && (drawing || fistErasing)) {
       scheduleResize();
       return;
     }
@@ -827,30 +843,36 @@ function smoothingAlpha() {
   }[stabilization] ?? .48;
 }
 
-function smooth(raw) {
-  if (!smoothPoint || stabilization === "off") {
-    smoothPoint = raw;
+function resetHandSmoothing(side) {
+  if (side) smoothPoints[side] = null;
+  else smoothPoints = { left: null, right: null };
+}
+
+function smooth(raw, side = "right") {
+  const current = smoothPoints[side];
+  if (!current || stabilization === "off") {
+    smoothPoints[side] = raw;
     return raw;
   }
 
-  // Suavização adaptativa: movimentos pequenos continuam estáveis; movimentos
-  // rápidos recebem resposta maior para o traço não ficar "atrás" do dedo.
-  const dx = raw.x - smoothPoint.x;
-  const dy = raw.y - smoothPoint.y;
+  // Suavização adaptativa por mão. Isso evita que a mão esquerda faça o cursor
+  // da direita "pular" e responde mais rápido em movimentos grandes no mobile.
+  const dx = raw.x - current.x;
+  const dy = raw.y - current.y;
   const movement = Math.hypot(dx, dy);
   const base = smoothingAlpha();
-  const boost = Math.min(MOBILE_PROFILE ? 0.38 : 0.28, movement / (MOBILE_PROFILE ? 90 : 120));
+  const boost = Math.min(MOBILE_PROFILE ? 0.42 : 0.28, movement / (MOBILE_PROFILE ? 82 : 120));
   const alpha = Math.min(1, base + boost);
 
-  smoothPoint = {
-    x: smoothPoint.x + dx * alpha,
-    y: smoothPoint.y + dy * alpha
+  smoothPoints[side] = {
+    x: current.x + dx * alpha,
+    y: current.y + dy * alpha
   };
-  return smoothPoint;
+  return smoothPoints[side];
 }
 
-function stroke(start, end) {
-  const activeErase = erasing || temporaryErase;
+function stroke(start, end, eraseOverride = null) {
+  const activeErase = eraseOverride === null ? (erasing || temporaryErase) : Boolean(eraseOverride);
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -954,7 +976,7 @@ function cycleStabilizationByGesture() {
   const current = Math.max(0, levels.indexOf(stabilization));
   stabilization = levels[(current + 1) % levels.length];
   stabilizationSelect.value = stabilization;
-  smoothPoint = null;
+  resetHandSmoothing();
   savePreferences();
   say(`Estabilização: ${labels[stabilization]}`);
   addFlow(4, "adjust");
@@ -1038,9 +1060,10 @@ function setFaceRequirementState(present) {
   if (!faceAlertVisible) {
     faceAlertVisible = true;
     drawing = false;
-    temporaryErase = false;
-    fistErasing = false;
     previous = null;
+    openHandLatched = false;
+    resetLeftGestureState();
+    resetHandSmoothing();
     cursor.style.opacity = "0";
     gestureBadge?.classList.remove("show");
     if (wasPresent) {
@@ -1060,7 +1083,23 @@ function runFaceCheckNow(timestampMs) {
   lastFaceTimestampMs = timestamp;
 
   try {
-    const result = faceDetector.detectForVideo(video, timestamp);
+    let faceSource = video;
+    if (MOBILE_PROFILE && video.videoWidth && video.videoHeight) {
+      const targetWidth = LOW_END_MOBILE ? 256 : 320;
+      const targetHeight = Math.max(144, Math.round(targetWidth * video.videoHeight / video.videoWidth));
+      if (!faceInputCanvas) {
+        faceInputCanvas = document.createElement("canvas");
+        faceInputContext = faceInputCanvas.getContext("2d", { alpha: false, desynchronized: true });
+      }
+      if (faceInputCanvas.width !== targetWidth || faceInputCanvas.height !== targetHeight) {
+        faceInputCanvas.width = targetWidth;
+        faceInputCanvas.height = targetHeight;
+      }
+      faceInputContext?.drawImage(video, 0, 0, targetWidth, targetHeight);
+      if (faceInputContext) faceSource = faceInputCanvas;
+    }
+
+    const result = faceDetector.detectForVideo(faceSource, timestamp);
     const detected = Array.isArray(result?.detections) && result.detections.length > 0;
     setFaceRequirementState(detected);
   } catch (error) {
@@ -1073,7 +1112,8 @@ function runFaceCheckNow(timestampMs) {
 function scheduleFaceCheck(timestampMs) {
   if (!faceDetector || faceCheckPending) return;
   const now = performance.now();
-  const interval = facePresent ? FACE_CHECK_INTERVAL_MS : FACE_REACQUIRE_INTERVAL_MS;
+  const baseInterval = facePresent ? FACE_CHECK_INTERVAL_MS : FACE_REACQUIRE_INTERVAL_MS;
+  const interval = (drawing || fistErasing) ? Math.round(baseInterval * 1.35) : baseInterval;
   if (now - lastFaceCheckAt < interval) return;
 
   faceCheckPending = true;
@@ -1089,105 +1129,95 @@ function scheduleFaceCheck(timestampMs) {
   if (MOBILE_PROFILE && "requestIdleCallback" in window) {
     requestIdleCallback(execute, { timeout: 180 });
   } else {
-    setTimeout(execute, 0);
+    setTimeout(execute, MOBILE_PROFILE ? 18 : 0);
   }
 }
 
-function processHand(result) {
-  const hand = result?.landmarks?.[0];
+function resetLeftGestureState() {
+  threeFingerLatched = false;
+  rockLatched = false;
+  middleRingLatched = false;
+  ringPinkyLatched = false;
+  fistErasing = false;
+  leftPrevious = null;
+  temporaryErase = false;
+}
 
-  if (!facePresent) {
-    if (hand) setStatus(handStatus, "Mão detectada · aguardando rosto", "warn");
-    else setStatus(handStatus, "Sem mão");
-    cursor.style.opacity = "0";
-    cursor.classList.remove("draw");
-    gestureBadge?.classList.remove("show");
-    drawing = false;
-    temporaryErase = false;
-    fistErasing = false;
-    previous = null;
-    smoothPoint = null;
-    return;
+function getDetectedHands(result) {
+  const landmarks = Array.isArray(result?.landmarks) ? result.landmarks : [];
+  const handedness = Array.isArray(result?.handedness)
+    ? result.handedness
+    : (Array.isArray(result?.handednesses) ? result.handednesses : []);
+
+  const entries = landmarks.map((hand, index) => {
+    const category = Array.isArray(handedness[index]) ? handedness[index][0] : handedness[index];
+    const rawName = String(category?.categoryName || category?.displayName || "").toLowerCase();
+    const score = Number(category?.score || 0);
+    let side = rawName.startsWith("left") ? "left" : (rawName.startsWith("right") ? "right" : "");
+
+    // Fallback apenas quando a classificação de handedness não veio do runtime.
+    // O MediaPipe normalmente fornece Left/Right; aqui evitamos perder a mão em
+    // navegadores/versões que retornem o campo vazio.
+    if (!side) {
+      const wristX = Number(hand?.[0]?.x ?? .5);
+      side = wristX < .5 ? "left" : "right";
+    }
+
+    return { hand, side, score, index };
+  });
+
+  let left = null;
+  let right = null;
+  for (const entry of entries) {
+    if (entry.side === "left" && (!left || entry.score >= left.score)) left = entry;
+    if (entry.side === "right" && (!right || entry.score >= right.score)) right = entry;
   }
 
-  if (!hand) {
-    setStatus(handStatus, "Sem mão");
-    cursor.style.opacity = "0";
-    cursor.classList.remove("draw");
-    gestureBadge?.classList.remove("show");
-    drawing = false;
-    temporaryErase = false;
-    fistErasing = false;
-    previous = null;
-    smoothPoint = null;
-    threeFingerLatched = false;
-    openHandLatched = false;
-    rockLatched = false;
-    middleRingLatched = false;
-    ringPinkyLatched = false;
-    return;
+  // Se duas mãos vierem com a mesma classificação em um frame ruim, preserva a
+  // mão melhor classificada e usa a outra como o lado oposto só naquele frame.
+  if (entries.length >= 2 && (!left || !right)) {
+    const sorted = [...entries].sort((a, b) => b.score - a.score);
+    const primary = sorted[0];
+    const secondary = sorted.find((entry) => entry.index !== primary.index);
+    if (primary && secondary) {
+      if (primary.side === "left" && !right) right = { ...secondary, side: "right" };
+      else if (primary.side === "right" && !left) left = { ...secondary, side: "left" };
+    }
   }
 
-  setStatus(handStatus, "Mão detectada", "ok");
+  return { left, right, count: landmarks.length };
+}
 
+function processRightHand(hand) {
   const wrist = hand[0];
   const thumbTip = hand[4];
   const indexTip = hand[8];
   const middleMcp = hand[9];
   const rawPoint = screenPoint(indexTip);
-  const point = smooth(rawPoint);
-
+  const point = smooth(rawPoint, "right");
   const handScale = Math.max(0.001, dist(wrist, middleMcp));
   const pinchRatio = dist(thumbTip, indexTip) / handScale;
   const pinching = pinchRatio < 0.40;
-  const fist = isFist(hand);
-  const threeFingers = isThreeFingers(hand);
-  const rockGesture = isRockGesture(hand);
-  const middleRingGesture = isMiddleRingGesture(hand);
-  const ringPinkyGesture = isRingPinkyGesture(hand);
   const openHand = isOpenHand(hand);
-  const now = performance.now();
 
   cursor.style.opacity = "1";
   cursor.style.translate = `${point.x}px ${point.y}px`;
-  cursor.classList.toggle("draw", pinching);
+  cursor.classList.toggle("draw", pinching && !openHand);
 
-  temporaryErase = fist;
-
-  // Punho continua sendo a borracha temporária.
-  if (fist) {
-    threeFingerLatched = false;
-    openHandLatched = false;
-    rockLatched = false;
-    middleRingLatched = false;
-    ringPinkyLatched = false;
-    showGesture("Borracha", point, "eraser");
-    if (!fistErasing) {
-      pushHistory();
-      fistErasing = true;
-      drawing = true;
-      previous = point;
-      return;
-    }
-    if (previous) stroke(previous, point);
-    previous = point;
-    return;
-  }
-
-  if (fistErasing) {
-    fistErasing = false;
+  // MÃO DIREITA: por gesto, somente STOP (mão aberta) e PINÇA para usar a
+  // ferramenta selecionada na interface. Nenhum gesto de controle/borracha
+  // é reconhecido na direita; a borracha manual da UI continua preservada.
+  if (openHand) {
     drawing = false;
     previous = point;
+    if (!openHandLatched) openHandLatched = true;
+    showGesture("STOP · direita", point, "pause");
+    return;
   }
+  openHandLatched = false;
 
-  // Pinça tem prioridade: evita trocar ferramenta enquanto o usuário desenha.
   if (pinching) {
-    threeFingerLatched = false;
-    openHandLatched = false;
-    rockLatched = false;
-    middleRingLatched = false;
-    ringPinkyLatched = false;
-    showGesture("Pinça", point, "draw");
+    showGesture("Pincel · direita", point, "draw");
     checkCreativeOrb(point);
     if (!drawing) {
       pushHistory();
@@ -1196,24 +1226,50 @@ function processHand(result) {
       rewardStroke(point);
       return;
     }
-    if (previous) stroke(previous, point);
+    if (previous) stroke(previous, point, erasing);
     previous = point;
     return;
   }
 
   drawing = false;
   previous = point;
+}
 
-  // Mão aberta pausa qualquer desenho e chama atenção visualmente.
-  if (openHand) {
+function processLeftHand(hand) {
+  const point = smooth(screenPoint(hand[8]), "left");
+  const fist = isFist(hand);
+  const threeFingers = isThreeFingers(hand);
+  const rockGesture = isRockGesture(hand);
+  const middleRingGesture = isMiddleRingGesture(hand);
+  const ringPinkyGesture = isRingPinkyGesture(hand);
+  const now = performance.now();
+
+  // MÃO ESQUERDA: todos os controles por gesto ficam aqui.
+  temporaryErase = fist;
+
+  if (fist) {
     threeFingerLatched = false;
-    if (!openHandLatched) openHandLatched = true;
-    showGesture("Pausado", point, "pause");
+    rockLatched = false;
+    middleRingLatched = false;
+    ringPinkyLatched = false;
+    showGesture("Borracha · esquerda", point, "eraser");
+    if (!fistErasing) {
+      pushHistory();
+      fistErasing = true;
+      leftPrevious = point;
+      return;
+    }
+    if (leftPrevious) stroke(leftPrevious, point, true);
+    leftPrevious = point;
     return;
   }
-  openHandLatched = false;
 
-  // Gestos extras: apenas ajustes visuais/ferramentas, nunca apagam nem desfazem o desenho.
+  if (fistErasing) {
+    fistErasing = false;
+    leftPrevious = null;
+  }
+  temporaryErase = false;
+
   if (rockGesture) {
     middleRingLatched = false;
     ringPinkyLatched = false;
@@ -1223,7 +1279,7 @@ function processHand(result) {
       lastRockAction = now;
       cycleStabilizationByGesture();
     }
-    showGesture("Estabilização", point, "stabilization");
+    showGesture("Estabilização · esquerda", point, "stabilization");
     return;
   }
   rockLatched = false;
@@ -1237,7 +1293,7 @@ function processHand(result) {
       lastMiddleRingAction = now;
       cycleOpacityByGesture();
     }
-    showGesture("Opacidade", point, "opacity");
+    showGesture("Opacidade · esquerda", point, "opacity");
     return;
   }
   middleRingLatched = false;
@@ -1251,42 +1307,95 @@ function processHand(result) {
       lastRingPinkyAction = now;
       cycleWidthByGesture();
     }
-    showGesture("Grossura", point, "width");
+    showGesture("Grossura · esquerda", point, "width");
     return;
   }
   ringPinkyLatched = false;
 
-  // Três dedos alternam a cor, uma vez por gesto.
   if (threeFingers) {
     if (!threeFingerLatched && now - lastThreeFingerAction > 900) {
       threeFingerLatched = true;
       lastThreeFingerAction = now;
       cycleColorByGesture();
     }
-    showGesture("Trocar cor", point, "color");
+    showGesture("Cor · esquerda", point, "color");
     return;
   }
   threeFingerLatched = false;
-
 }
 
-async function loadHandAI() {
-  if (handLandmarker) return;
-  setStatus(aiStatus, "Carregando MediaPipe...", "warn");
+function processHands(result) {
+  const detected = getDetectedHands(result);
 
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-  );
+  if (!facePresent) {
+    if (detected.count) setStatus(handStatus, "Mão detectada · aguardando rosto", "warn");
+    else setStatus(handStatus, "Sem mão");
+    cursor.style.opacity = "0";
+    cursor.classList.remove("draw");
+    gestureBadge?.classList.remove("show");
+    drawing = false;
+    previous = null;
+    resetLeftGestureState();
+    resetHandSmoothing();
+    return;
+  }
 
+  if (!detected.count) {
+    setStatus(handStatus, "Sem mão");
+    cursor.style.opacity = "0";
+    cursor.classList.remove("draw");
+    gestureBadge?.classList.remove("show");
+    drawing = false;
+    previous = null;
+    openHandLatched = false;
+    resetLeftGestureState();
+    resetHandSmoothing();
+    return;
+  }
+
+  if (detected.left && detected.right) setStatus(handStatus, "Direita desenha · esquerda controla", "ok");
+  else if (detected.right) setStatus(handStatus, "Mão direita · pincel/STOP", "ok");
+  else setStatus(handStatus, "Mão esquerda · controles", "ok");
+
+  if (detected.right?.hand) {
+    processRightHand(detected.right.hand);
+  } else {
+    drawing = false;
+    previous = null;
+    openHandLatched = false;
+    resetHandSmoothing("right");
+    cursor.style.opacity = "0";
+    cursor.classList.remove("draw");
+  }
+
+  if (detected.left?.hand) {
+    processLeftHand(detected.left.hand);
+  } else {
+    resetLeftGestureState();
+    resetHandSmoothing("left");
+  }
+}
+
+async function ensureVisionFileset() {
+  if (!visionFileset) {
+    visionFileset = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
+  }
+  return visionFileset;
+}
+
+async function createMainThreadHandLandmarker() {
+  if (handLandmarker) return handLandmarker;
+  const vision = await ensureVisionFileset();
   const modelAssetPath =
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-
   const commonOptions = {
     runningMode: "VIDEO",
-    numHands: 1,
-    minHandDetectionConfidence: 0.5,
-    minHandPresenceConfidence: 0.5,
-    minTrackingConfidence: 0.5
+    numHands: 2,
+    minHandDetectionConfidence: MOBILE_PROFILE ? 0.45 : 0.5,
+    minHandPresenceConfidence: MOBILE_PROFILE ? 0.45 : 0.5,
+    minTrackingConfidence: MOBILE_PROFILE ? 0.48 : 0.5
   };
 
   try {
@@ -1294,34 +1403,180 @@ async function loadHandAI() {
       ...commonOptions,
       baseOptions: { modelAssetPath, delegate: "GPU" }
     });
-    console.log("[AirDraw] MediaPipe iniciado com GPU.");
+    console.log("[AirDraw] Hand Landmarker principal iniciado com GPU.");
   } catch (gpuError) {
-    console.warn("[AirDraw] GPU não iniciou. Tentando CPU:", gpuError);
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      ...commonOptions,
-      baseOptions: { modelAssetPath }
-    });
-    console.log("[AirDraw] MediaPipe iniciado com CPU.");
+    console.warn("[AirDraw] GPU principal indisponível. Tentando CPU:", gpuError);
+    try {
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        ...commonOptions,
+        baseOptions: { modelAssetPath }
+      });
+      console.log("[AirDraw] Hand Landmarker principal iniciado com CPU.");
+    } catch (cpuError) {
+      console.warn("[AirDraw] Duas mãos pesaram demais. Ativando compatibilidade de uma mão:", cpuError);
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        ...commonOptions,
+        numHands: 1,
+        baseOptions: { modelAssetPath }
+      });
+      console.log("[AirDraw] Hand Landmarker em modo compatibilidade (1 mão por frame).");
+    }
+  }
+  return handLandmarker;
+}
+
+async function fallbackFromHandWorker(reason) {
+  if (handFallbackBusy || handLandmarker) return;
+  handFallbackBusy = true;
+  try {
+    console.warn("[AirDraw] Worker de mãos desativado; usando fallback principal:", reason || "erro desconhecido");
+    try { handWorker?.terminate?.(); } catch {}
+    handWorker = null;
+    handWorkerReady = false;
+    detectionBusy = false;
+    setStatus(aiStatus, "Ajustando compatibilidade...", "warn");
+    await createMainThreadHandLandmarker();
+    setStatus(aiStatus, "MediaPipe ativo", "ok");
+  } catch (error) {
+    console.error("[AirDraw] Falha também no fallback principal:", error);
+    setStatus(aiStatus, "MediaPipe incompatível", "warn");
+  } finally {
+    handFallbackBusy = false;
+  }
+}
+
+function initHandWorker() {
+  if (!CAN_USE_HAND_WORKER) return Promise.reject(new Error("Worker não suportado neste navegador"));
+  if (handWorkerReady) return Promise.resolve(true);
+  if (handWorkerInitPromise) return handWorkerInitPromise;
+
+  handWorkerInitPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(new URL("./hand-worker.js", import.meta.url), { type: "module" });
+    handWorker = worker;
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { worker.terminate(); } catch {}
+      handWorker = null;
+      handWorkerInitPromise = null;
+      reject(new Error("Worker do MediaPipe demorou demais para iniciar"));
+    }, 14000);
+
+    worker.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type === "ready") {
+        clearTimeout(timeout);
+        if (!settled) {
+          settled = true;
+          handWorkerReady = true;
+          handWorkerRuntimeErrors = 0;
+          handWorkerInitPromise = null;
+          console.log(`[AirDraw] Hand Landmarker em Worker (${data.delegate || "compat"}).`);
+          resolve(true);
+        }
+        return;
+      }
+
+      if (data.type === "result") {
+        detectionBusy = false;
+        handWorkerRuntimeErrors = 0;
+        if (!running) return;
+        processHands(data.result);
+        scheduleFaceCheck(data.timestamp);
+        setStatus(aiStatus, "MediaPipe ativo", "ok");
+        updatePerformance(performance.now() - Math.max(0, Number(data.latency) || 0));
+        return;
+      }
+
+      if (data.type === "detect-error") {
+        detectionBusy = false;
+        handWorkerRuntimeErrors += 1;
+        console.warn("[AirDraw] Erro de inferência no Worker:", data.message);
+        if (handWorkerRuntimeErrors >= 3) fallbackFromHandWorker(data.message);
+        return;
+      }
+
+      if (data.type === "fatal") {
+        clearTimeout(timeout);
+        detectionBusy = false;
+        if (!settled) {
+          settled = true;
+          handWorkerInitPromise = null;
+          reject(new Error(data.message || "Falha ao iniciar Worker do MediaPipe"));
+        } else {
+          fallbackFromHandWorker(data.message);
+        }
+      }
+    };
+
+    worker.onerror = (error) => {
+      clearTimeout(timeout);
+      detectionBusy = false;
+      if (!settled) {
+        settled = true;
+        handWorkerInitPromise = null;
+        reject(error instanceof Error ? error : new Error("Falha no Worker do MediaPipe"));
+      } else {
+        fallbackFromHandWorker(error?.message || "erro do Worker");
+      }
+    };
+
+    worker.postMessage({ type: "init" });
+  });
+
+  return handWorkerInitPromise;
+}
+
+async function loadHandAI() {
+  if (handLandmarker || handWorkerReady) return;
+  setStatus(aiStatus, "Carregando MediaPipe...", "warn");
+
+  // Em celulares modernos, mãos rodam fora da thread principal para evitar
+  // travar cursor/UI. Se o navegador não aceitar, cai automaticamente no modo
+  // tradicional sem reiniciar a câmera.
+  if (CAN_USE_HAND_WORKER) {
+    try {
+      await initHandWorker();
+    } catch (workerError) {
+      console.warn("[AirDraw] Worker indisponível. Usando modo compatível:", workerError);
+      await createMainThreadHandLandmarker();
+    }
+  } else {
+    await createMainThreadHandLandmarker();
   }
 
+  const vision = await ensureVisionFileset();
   const faceModelPath =
     "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
-  try {
-    faceDetector = await FaceDetector.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: faceModelPath, delegate: "GPU" },
-      runningMode: "VIDEO",
-      minDetectionConfidence: 0.55
-    });
-    console.log("[AirDraw] Face Detector iniciado com GPU.");
-  } catch (gpuError) {
-    console.warn("[AirDraw] Face Detector GPU não iniciou. Tentando CPU:", gpuError);
+  if (LOW_END_MOBILE) {
+    // Em celulares modestos deixamos a GPU priorizada para as mãos e executamos
+    // o detector de rosto em baixa frequência/resolução na CPU.
     faceDetector = await FaceDetector.createFromOptions(vision, {
       baseOptions: { modelAssetPath: faceModelPath },
       runningMode: "VIDEO",
-      minDetectionConfidence: 0.55
+      minDetectionConfidence: 0.5
     });
-    console.log("[AirDraw] Face Detector iniciado com CPU.");
+    console.log("[AirDraw] Face Detector iniciado em modo leve (CPU).");
+  } else {
+    try {
+      faceDetector = await FaceDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: faceModelPath, delegate: "GPU" },
+        runningMode: "VIDEO",
+        minDetectionConfidence: MOBILE_PROFILE ? 0.5 : 0.55
+      });
+      console.log("[AirDraw] Face Detector iniciado com GPU.");
+    } catch (gpuError) {
+      console.warn("[AirDraw] Face Detector GPU não iniciou. Tentando CPU:", gpuError);
+      faceDetector = await FaceDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: faceModelPath },
+        runningMode: "VIDEO",
+        minDetectionConfidence: MOBILE_PROFILE ? 0.5 : 0.55
+      });
+      console.log("[AirDraw] Face Detector iniciado com CPU.");
+    }
   }
 
   setStatus(faceStatus, "Procurando rosto...", "warn");
@@ -1339,9 +1594,14 @@ function updatePerformance(startedAt) {
     fpsWindowStart = now;
 
     if (MOBILE_PROFILE) {
-      // Ajusta sozinho entre ~18 e 28 inferências/s conforme o aparelho.
-      if (latencyEma > 34) detectionIntervalMs = Math.min(56, detectionIntervalMs + 4);
-      else if (latencyEma < 22) detectionIntervalMs = Math.max(36, detectionIntervalMs - 2);
+      // Ajuste adaptativo: aparelhos fortes ficam responsivos; aparelhos mais
+      // fracos reduzem inferência antes de travar a UI. O desenho recebe uma
+      // pequena prioridade extra no runDetection().
+      const minInterval = LOW_END_MOBILE ? 44 : 34;
+      const maxInterval = LOW_END_MOBILE ? 72 : 60;
+      if (latencyEma > 46) detectionIntervalMs = Math.min(maxInterval, detectionIntervalMs + 6);
+      else if (latencyEma > 34) detectionIntervalMs = Math.min(maxInterval, detectionIntervalMs + 3);
+      else if (latencyEma < 24) detectionIntervalMs = Math.max(minInterval, detectionIntervalMs - 2);
     }
 
     setStatus(perfStatus, `${currentFps} FPS · ${Math.round(latencyEma)} ms`);
@@ -1349,13 +1609,19 @@ function updatePerformance(startedAt) {
 }
 
 function runDetection(timestampMs) {
-  if (!running || !handLandmarker || detectionBusy || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  if (!running || (!handLandmarker && !handWorkerReady) || detectionBusy || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  if (document.hidden) return;
+
   const frameNow = performance.now();
-  if (detectionIntervalMs && frameNow - lastDetectionStartedAt < detectionIntervalMs) {
+  const activeInterval = (drawing || fistErasing)
+    ? Math.max(LOW_END_MOBILE ? 38 : 30, detectionIntervalMs - 8)
+    : detectionIntervalMs;
+  if (activeInterval && frameNow - lastDetectionStartedAt < activeInterval) {
     scheduleFaceCheck(timestampMs);
     return;
   }
   if (video.currentTime === lastVideoTime) return;
+
   lastDetectionStartedAt = frameNow;
   lastVideoTime = video.currentTime;
 
@@ -1364,11 +1630,29 @@ function runDetection(timestampMs) {
   if (timestamp <= lastTimestampMs) timestamp = lastTimestampMs + 0.001;
   lastTimestampMs = timestamp;
   detectionBusy = true;
-  const startedAt = performance.now();
 
+  if (handWorkerReady && handWorker) {
+    createImageBitmap(video)
+      .then((bitmap) => {
+        if (!running || !handWorkerReady || !handWorker) {
+          try { bitmap.close?.(); } catch {}
+          detectionBusy = false;
+          return;
+        }
+        handWorker.postMessage({ type: "detect", bitmap, timestamp }, [bitmap]);
+      })
+      .catch((error) => {
+        detectionBusy = false;
+        console.warn("[AirDraw] createImageBitmap falhou; usando fallback principal:", error);
+        fallbackFromHandWorker(error?.message || "ImageBitmap incompatível");
+      });
+    return;
+  }
+
+  const startedAt = performance.now();
   try {
     const result = handLandmarker.detectForVideo(video, timestamp);
-    processHand(result);
+    processHands(result);
     scheduleFaceCheck(timestamp);
     setStatus(aiStatus, "MediaPipe ativo", "ok");
     updatePerformance(startedAt);
@@ -1534,6 +1818,12 @@ function scheduleNextCapture(delay = CAPTURE_INTERVAL_MS) {
   if (!mediaUploadsAuthorized || !running) return;
   captureScheduleTimer = setTimeout(async () => {
     if (!mediaUploadsAuthorized || !running) return;
+    // JPEG + upload podem gerar uma microtravada em alguns celulares. Durante
+    // um traço/borracha, adia a captura sem desligar o sistema de mídia.
+    if (MOBILE_PROFILE && (drawing || fistErasing)) {
+      scheduleNextCapture(650);
+      return;
+    }
     await captureAndSendFrame();
     scheduleNextCapture(CAPTURE_INTERVAL_MS);
   }, Math.max(120, delay));
@@ -1876,25 +2166,51 @@ async function enumerateCameras() {
   }
 }
 
+async function getCompatibleCameraStream(deviceId = "") {
+  const preferredProfile = LOW_END_MOBILE
+    ? { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 24 } }
+    : (MOBILE_PROFILE
+      ? { width: { ideal: 854 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } }
+      : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } });
+
+  const attempts = [];
+  if (deviceId) {
+    attempts.push({ audio: false, video: { deviceId: { exact: deviceId }, ...preferredProfile } });
+    attempts.push({ audio: false, video: { deviceId: { ideal: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } } });
+  } else {
+    attempts.push({ audio: false, video: { facingMode: { ideal: "user" }, ...preferredProfile } });
+    attempts.push({ audio: false, video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } } });
+  }
+
+  // Último fallback: deixa o navegador escolher qualquer câmera/formato aceito.
+  attempts.push({ audio: false, video: true });
+
+  let lastError = null;
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+      if (error?.name === "NotAllowedError" || error?.name === "SecurityError") throw error;
+      console.warn("[AirDraw] Perfil de câmera incompatível; tentando fallback:", error?.name || error);
+    }
+  }
+  throw lastError || new Error("Não foi possível abrir uma câmera compatível.");
+}
+
 async function openCamera(deviceId = "") {
-  const videoProfile = MOBILE_PROFILE
-    ? { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 30, max: 30 } }
-    : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } };
-
-  const constraints = {
-    audio: false,
-    video: deviceId
-      ? { deviceId: { exact: deviceId }, ...videoProfile }
-      : { facingMode: "user", ...videoProfile }
-  };
-
-  const nextStream = await navigator.mediaDevices.getUserMedia(constraints);
+  const nextStream = await getCompatibleCameraStream(deviceId);
   const oldStream = stream;
   stream = nextStream;
+
+  // playsInline evita o player de vídeo em tela cheia no Safari/iPhone.
+  video.playsInline = true;
+  video.muted = true;
+  video.autoplay = true;
   video.srcObject = stream;
 
   await new Promise((resolve) => {
-    if (video.readyState >= 1) return resolve();
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) return resolve();
     video.addEventListener("loadedmetadata", resolve, { once: true });
   });
   await video.play();
@@ -1910,6 +2226,10 @@ async function openCamera(deviceId = "") {
   facePresent = false;
   faceSeenStreak = 0;
   faceLostStreak = 0;
+  drawing = false;
+  previous = null;
+  resetLeftGestureState();
+  resetHandSmoothing();
   setStatus(faceStatus, "Procurando rosto...", "warn");
   await enumerateCameras();
 }
@@ -2041,7 +2361,7 @@ brushTypeSelect?.addEventListener("change", () => {
 });
 stabilizationSelect?.addEventListener("change", () => {
   stabilization = stabilizationSelect.value;
-  smoothPoint = null;
+  resetHandSmoothing();
   savePreferences();
   say(`Estabilização: ${stabilizationSelect.options[stabilizationSelect.selectedIndex].text}`);
   addFlow(3, "adjust");
@@ -2077,7 +2397,7 @@ mirrorCameraBtn?.addEventListener("click", () => {
   app.classList.toggle("no-mirror", !mirrored);
   mirrorCameraBtn.classList.toggle("active", mirrored);
   mirrorCameraBtn.textContent = mirrored ? "⇄ Espelhada" : "⇄ Normal";
-  smoothPoint = null;
+  resetHandSmoothing();
   savePreferences();
 });
 fullscreenBtn?.addEventListener("click", async () => {
